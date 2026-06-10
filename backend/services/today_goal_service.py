@@ -21,6 +21,7 @@ from backend.services.goal_generation_resources import (
 )
 from backend.services.llm_client import generate_json_with_fallback
 from backend.services.project_progress_service import ensure_projects_seeded
+from backend.services.workday_policy import is_workday
 
 
 PROMPT_VERSION_MOCK = "goal_generation_v1_mock"
@@ -45,6 +46,13 @@ class TodayGoalResult:
 
 class DailyGoalGenerationError(RuntimeError):
     """Raised when a generated daily goal cannot be validated or persisted."""
+
+
+@dataclass(frozen=True)
+class ProjectTodayGoalRefreshResult:
+    status: str
+    goal: dict[str, Any] | None
+    created_count: int
 
 
 class MockDailyGoalLLMAdapter:
@@ -344,6 +352,111 @@ def regenerate_today_goal(db_path: str | Path, today: date) -> TodayGoalResult:
             goals=goals,
             created_count=regenerated_count,
             carried_over_count=0,
+        )
+    except sqlite3.DatabaseError as exc:
+        raise DailyGoalGenerationError(str(exc)) from exc
+    finally:
+        connection.close()
+
+
+def refresh_today_goal_for_project(
+    db_path: str | Path,
+    today: date,
+    project_id: int,
+    *,
+    force: bool,
+    revision_reason: str,
+) -> ProjectTodayGoalRefreshResult:
+    """Generate or refresh today's goal for one active project only."""
+
+    if not is_workday(today):
+        return ProjectTodayGoalRefreshResult(status="skipped_non_workday", goal=None, created_count=0)
+
+    goal_date = today.isoformat()
+    connection = initialize_database(db_path)
+    try:
+        with connection:
+            _ensure_default_profile(connection)
+            ensure_projects_seeded(connection)
+            project = repo.get_project(connection, int(project_id))
+            if project is None or str(project.get("status") or "") != "active":
+                return ProjectTodayGoalRefreshResult(status="skipped_inactive", goal=None, created_count=0)
+
+            existing = repo.get_goal_with_active_version_by_date_and_project(
+                connection,
+                goal_date,
+                int(project["id"]),
+            )
+            if existing and existing.get("active_version") is not None and not force:
+                return ProjectTodayGoalRefreshResult(
+                    status="kept",
+                    goal=_attach_goal_output(existing),
+                    created_count=0,
+                )
+
+            had_active_goal = bool(existing and existing.get("active_version") is not None)
+            context = _build_generation_context(connection, today, project)
+            llm_result = _generate_daily_goal_with_llm(context)
+            context["llm_metadata"] = llm_result.metadata
+            goal_output = llm_result.output
+            quality_result = ensure_goal_quality(goal_output, flow="generation")
+            goal_output = quality_result.goal
+
+            try:
+                validate_daily_goal_output(goal_output)
+            except JsonSchemaValidationError as exc:
+                raise DailyGoalGenerationError(str(exc)) from exc
+
+            daily_goal_id = _ensure_daily_goal_record(
+                connection,
+                today,
+                existing["daily_goal"] if existing else None,
+                context,
+                goal_output,
+                preserve_generated_at=False,
+            )
+            repo.create_goal_version(
+                connection,
+                daily_goal_id=daily_goal_id,
+                version_no=len(repo.list_goal_versions(connection, daily_goal_id)) + 1,
+                is_active=1,
+                main_goal=goal_output["main_goal"],
+                goal_reason=goal_output["rationale"],
+                success_criteria=goal_output["completion_criteria"],
+                estimated_minutes=goal_output["estimated_minutes"],
+                difficulty_level=goal_output["difficulty"],
+                minimum_version=goal_output["minimum_acceptable_result"],
+                stretch_challenge=goal_output["stretch_challenge"],
+                avoid_today=json.dumps(
+                    goal_output["do_not_do_today"],
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+                goal_type=goal_output["goal_type"],
+                revision_source="system_regeneration" if had_active_goal else "initial_generation",
+                revision_reason=revision_reason,
+                critic_result={
+                    "schema": "daily_goal.v1",
+                    "quality_status": quality_result.quality_status,
+                    "review": quality_result.review,
+                    "llm_metadata": context["llm_metadata"],
+                },
+                prompt_version=context["llm_metadata"]["prompt_version"],
+            )
+            _mark_selected_focus_carried(connection, context, daily_goal_id, goal_output)
+
+            generated = repo.get_goal_with_active_version_by_date_and_project(
+                connection,
+                goal_date,
+                int(project["id"]),
+            )
+            if generated is None or generated.get("active_version") is None:
+                raise DailyGoalGenerationError("Generated goal was not persisted.")
+
+        return ProjectTodayGoalRefreshResult(
+            status="refreshed" if had_active_goal else "created",
+            goal=_attach_goal_output(generated),
+            created_count=1,
         )
     except sqlite3.DatabaseError as exc:
         raise DailyGoalGenerationError(str(exc)) from exc

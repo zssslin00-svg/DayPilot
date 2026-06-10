@@ -132,7 +132,7 @@ CREATE TABLE IF NOT EXISTS project_lifecycle_events (
   event_date TEXT NOT NULL DEFAULT (date('now')),
   raw_message TEXT NOT NULL,
   action TEXT NOT NULL
-    CHECK (action IN ('create_project', 'complete_project', 'update_project', 'no_change')),
+    CHECK (action IN ('create_project', 'complete_project', 'update_project', 'delete_project', 'no_change')),
   project_id INTEGER,
   project_name TEXT,
   priority TEXT,

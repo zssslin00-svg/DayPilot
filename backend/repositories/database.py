@@ -30,6 +30,7 @@ def initialize_database(
     with connection:
         connection.executescript(schema)
     _migrate_projects_status_completed(connection)
+    _migrate_project_lifecycle_delete_action(connection)
     _migrate_project_scoped_daily_goals(connection)
     _migrate_project_checkins_completion_status(connection)
     return connection
@@ -101,6 +102,100 @@ def _migrate_projects_status_completed(connection: sqlite3.Connection) -> None:
                 ALTER TABLE projects_new RENAME TO projects;
                 CREATE INDEX IF NOT EXISTS idx_projects_priority
                   ON projects(priority, status, id);
+                """
+            )
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")
+
+
+def _migrate_project_lifecycle_delete_action(connection: sqlite3.Connection) -> None:
+    row = connection.execute(
+        """
+        SELECT sql
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'project_lifecycle_events'
+        """
+    ).fetchone()
+    if row is None:
+        return
+    table_sql = str(row["sql"] or "")
+    if "'delete_project'" in table_sql:
+        return
+
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        with connection:
+            connection.executescript(
+                """
+                CREATE TABLE project_lifecycle_events_new (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  event_date TEXT NOT NULL DEFAULT (date('now')),
+                  raw_message TEXT NOT NULL,
+                  action TEXT NOT NULL
+                    CHECK (action IN ('create_project', 'complete_project', 'update_project', 'delete_project', 'no_change')),
+                  project_id INTEGER,
+                  project_name TEXT,
+                  priority TEXT,
+                  previous_status TEXT,
+                  new_status TEXT,
+                  previous_status_summary TEXT,
+                  new_status_summary TEXT,
+                  planning_bias TEXT,
+                  confidence REAL CHECK (confidence IS NULL OR confidence BETWEEN 0 AND 1),
+                  applied INTEGER NOT NULL DEFAULT 0 CHECK (applied IN (0, 1)),
+                  reason TEXT,
+                  llm_metadata TEXT NOT NULL DEFAULT '{}',
+                  raw_output TEXT NOT NULL DEFAULT '{}',
+                  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+                );
+
+                INSERT INTO project_lifecycle_events_new (
+                  id,
+                  event_date,
+                  raw_message,
+                  action,
+                  project_id,
+                  project_name,
+                  priority,
+                  previous_status,
+                  new_status,
+                  previous_status_summary,
+                  new_status_summary,
+                  planning_bias,
+                  confidence,
+                  applied,
+                  reason,
+                  llm_metadata,
+                  raw_output,
+                  created_at
+                )
+                SELECT
+                  id,
+                  event_date,
+                  raw_message,
+                  action,
+                  project_id,
+                  project_name,
+                  priority,
+                  previous_status,
+                  new_status,
+                  previous_status_summary,
+                  new_status_summary,
+                  planning_bias,
+                  confidence,
+                  applied,
+                  reason,
+                  llm_metadata,
+                  raw_output,
+                  created_at
+                FROM project_lifecycle_events;
+
+                DROP TABLE project_lifecycle_events;
+                ALTER TABLE project_lifecycle_events_new RENAME TO project_lifecycle_events;
+                CREATE INDEX IF NOT EXISTS idx_project_lifecycle_project_date
+                  ON project_lifecycle_events(project_id, event_date, created_at);
                 """
             )
     finally:

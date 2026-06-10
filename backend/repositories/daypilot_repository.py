@@ -345,6 +345,14 @@ def update_project(connection: sqlite3.Connection, project_id: int, **changes: A
     return _update(connection, "projects", project_id, changes)
 
 
+def delete_project(connection: sqlite3.Connection, project_id: int) -> Record | None:
+    project = get_project(connection, project_id)
+    if project is None:
+        return None
+    connection.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    return project
+
+
 def list_projects(connection: sqlite3.Connection, *, include_archived: bool = False) -> list[Record]:
     where = "" if include_archived else "WHERE status = 'active'"
     return _fetch_all(

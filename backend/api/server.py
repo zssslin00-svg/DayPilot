@@ -408,6 +408,7 @@ class DayPilotHandler(BaseHTTPRequestHandler):
                 self.server.db_path,
                 payload,
                 soul_path=self.server.soul_path,
+                today=self.server.today_provider(),
             )
         except ProjectLifecycleValidationError as exc:
             self._send_json(400, {"error": "invalid_project_lifecycle", "detail": str(exc)})

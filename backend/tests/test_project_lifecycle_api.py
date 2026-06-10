@@ -121,6 +121,25 @@ def test_project_lifecycle_api_lists_creates_and_completes_projects() -> None:
         assert status == 200
         assert created["status"] == "applied"
         assert created["action"] == "create_project"
+        assert created["items"][0]["today_goal_policy"] == "create"
+        assert created["items"][0]["today_goal_refresh"] == "created"
+
+        status, renamed = _request(
+            db_path,
+            soul_path,
+            "POST",
+            "/api/projects/lifecycle",
+            {
+                "message": "把这个项目微调一个编排规则的模型改成下面这个项目：实现基于规则库的规则编排模块；当前进度是正在确认实现方案",
+            },
+        )
+        assert status == 200
+        assert renamed["status"] == "applied"
+        assert renamed["action"] == "update_project"
+        assert renamed["items"][0]["today_goal_policy"] == "refresh"
+        assert renamed["items"][0]["today_goal_refresh"] == "refreshed"
+        assert renamed["project"]["name"] == "实现基于规则库的规则编排模块"
+        assert renamed["project"]["status_summary"] == "正在确认实现方案"
 
         status, completed = _request(
             db_path,
@@ -132,15 +151,31 @@ def test_project_lifecycle_api_lists_creates_and_completes_projects() -> None:
         assert status == 200
         assert completed["status"] == "applied"
         assert completed["action"] == "complete_project"
+        assert completed["items"][0]["today_goal_policy"] == "remove"
+        assert completed["items"][0]["today_goal_refresh"] == "removed"
+
+        status, deleted = _request(
+            db_path,
+            soul_path,
+            "POST",
+            "/api/projects/lifecycle",
+            {"message": "删除项目：实现基于规则库的规则编排模块"},
+        )
+        assert status == 200
+        assert deleted["status"] == "applied"
+        assert deleted["action"] == "delete_project"
+        assert deleted["items"][0]["today_goal_policy"] == "remove"
+        assert deleted["items"][0]["today_goal_refresh"] == "removed"
 
         status, overview = _request(db_path, soul_path, "GET", "/api/projects")
         active_names = [project["name"] for project in overview["active_projects"]]
         completed_names = [project["name"] for project in overview["completed_projects"]]
-        assert "微调一个编排规则的模型" in active_names
+        assert "实现基于规则库的规则编排模块" not in active_names
+        assert "微调一个编排规则的模型" not in active_names
         assert "DayPilot 日用验证" not in active_names
         assert "DayPilot 日用验证" in completed_names
         soul_text = soul_path.read_text(encoding="utf-8")
-        assert "微调一个编排规则的模型" in soul_text
+        assert "实现基于规则库的规则编排模块" not in soul_text
         assert "DayPilot 日用验证" not in soul_text
 
 
