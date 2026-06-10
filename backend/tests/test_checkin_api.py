@@ -95,7 +95,7 @@ def _seed_goal(db_path: Path, goal_date: str) -> int:
         connection.close()
 
 
-def test_checkin_saves_required_fields_and_allows_empty_tomorrow_direction() -> None:
+def test_checkin_allows_empty_text_fields_and_uses_completed_status_rate() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         db_path = Path(temp_dir) / "daypilot-checkin.sqlite3"
         goal_id = _seed_goal(db_path, "2026-06-08")
@@ -106,7 +106,7 @@ def test_checkin_saves_required_fields_and_allows_empty_tomorrow_direction() -> 
             {
                 "date": "2026-06-08",
                 "goal_id": goal_id,
-                "completion_text": "完成了 check-in 保存接口。",
+                "completion_text": "",
                 "felt_difficulty": 3,
                 "tomorrow_direction": "",
             },
@@ -120,16 +120,47 @@ def test_checkin_saves_required_fields_and_allows_empty_tomorrow_direction() -> 
         assert payload["checkin"]["felt_difficulty"] == 3
         assert payload["checkin"]["parsed_completion_rate"] == 1.0
         assert payload["updated_difficulty"]["ability_state"]["target_difficulty_level"] == 2
-        assert payload["updated_difficulty"]["completion_parse_result"]["source"] == "done_keyword"
+        assert (
+            payload["updated_difficulty"]["completion_parse_result"]["source"]
+            == "completion_status_completed"
+        )
 
         connection = connect_database(db_path)
         try:
             checkin = repo.get_daily_checkin_by_date(connection, "2026-06-08")
-            assert checkin["completion_text"] == "完成了 check-in 保存接口。"
+            assert checkin["completion_text"] == ""
             assert checkin["parsed_completion_rate"] == 1.0
             assert repo.get_daily_goal(connection, goal_id)["status"] == "checked_in"
         finally:
             connection.close()
+
+
+def test_checkin_empty_completion_text_uses_incomplete_status_rate() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = Path(temp_dir) / "daypilot-checkin-incomplete-empty.sqlite3"
+        goal_id = _seed_goal(db_path, "2026-06-08")
+
+        status, payload = _post_checkin(
+            date(2026, 6, 8),
+            db_path,
+            {
+                "date": "2026-06-08",
+                "goal_id": goal_id,
+                "completion_status": "incomplete",
+                "completion_text": "",
+                "felt_difficulty": 3,
+                "tomorrow_direction": "",
+            },
+        )
+
+        assert status == 200
+        assert payload["checkin"]["completion_text"] == ""
+        assert payload["checkin"]["tomorrow_direction"] is None
+        assert payload["checkin"]["parsed_completion_rate"] == 0.0
+        assert (
+            payload["updated_difficulty"]["completion_parse_result"]["source"]
+            == "completion_status_incomplete"
+        )
 
 
 def test_checkin_updates_existing_submission() -> None:
@@ -260,7 +291,8 @@ def test_friday_checkin_can_generate_weekly_report() -> None:
 
 
 def main() -> None:
-    test_checkin_saves_required_fields_and_allows_empty_tomorrow_direction()
+    test_checkin_allows_empty_text_fields_and_uses_completed_status_rate()
+    test_checkin_empty_completion_text_uses_incomplete_status_rate()
     test_checkin_updates_existing_submission()
     test_checkin_rejects_invalid_felt_difficulty()
     test_china_holiday_checkin_is_rejected()

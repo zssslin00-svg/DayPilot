@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>DayPilot</title>
-    <link rel="stylesheet" href="/styles/main.css?v=20260610-action-bottom-align" />
-    <script type="module" src="/services/today-goal.js?v=20260610-action-bottom-align"></script>
+    <link rel="stylesheet" href="/styles/main.css?v=20260610-feedback-tight-labels" />
+    <script type="module" src="/services/today-goal.js?v=20260610-feedback-tight-labels"></script>
   </head>
   <body>
     <div class="paper-frame">
@@ -83,20 +83,17 @@
           </article>
 
           <div class="task-grid">
-            <form class="work-form" id="goal-feedback-form">
+            <form class="work-form feedback-form" id="goal-feedback-form">
               <h3>反馈修正</h3>
-              <label>
-                <span>修改意见</span>
-                <textarea id="goal-feedback-message" name="message" rows="3" required></textarea>
-              </label>
+              <textarea id="goal-feedback-message" name="message" rows="3" required aria-label="修改意见"></textarea>
               <button class="text-button" id="goal-feedback-submit" type="submit">生成新目标版本</button>
             </form>
 
-            <form class="work-form" id="checkin-form">
+            <form class="work-form checkin-form" id="checkin-form">
               <h3>Check-in</h3>
-              <label>
-                <span>完成情况</span>
-                <textarea id="completion-text" name="completion_text" rows="4" required></textarea>
+              <label class="checkin-text-field">
+                <span>完成说明（可空）</span>
+                <textarea id="completion-text" name="completion_text" rows="4"></textarea>
               </label>
               <fieldset>
                 <legend>主观难度</legend>
@@ -108,8 +105,8 @@
                   <label><input type="radio" name="felt_difficulty" value="5" />5</label>
                 </div>
               </fieldset>
-              <label>
-                <span>明天方向</span>
+              <label class="checkin-text-field">
+                <span>明天方向（可空）</span>
                 <textarea id="tomorrow-direction" name="tomorrow_direction" rows="3"></textarea>
               </label>
               <button class="text-button" id="checkin-submit" type="submit">保存 check-in</button>

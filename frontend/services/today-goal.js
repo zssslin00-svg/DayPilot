@@ -384,7 +384,7 @@ function projectGoalCard(goalRecord, fallbackDate) {
 
 function projectFeedbackForm(goalRecord) {
   const form = document.createElement("form");
-  form.className = "work-form compact-form";
+  form.className = "work-form compact-form feedback-compact-form";
   const textarea = document.createElement("textarea");
   textarea.name = "message";
   textarea.rows = 2;
@@ -404,7 +404,7 @@ function projectFeedbackForm(goalRecord) {
 
 function projectCheckinForm(goalRecord) {
   const form = document.createElement("form");
-  form.className = "work-form compact-form";
+  form.className = "work-form compact-form checkin-compact-form";
   form.dataset.goalId = goalRecord?.daily_goal?.id || "";
   form.dataset.date = goalRecord?.daily_goal?.goal_date || "";
 
@@ -427,8 +427,10 @@ function projectCheckinForm(goalRecord) {
   const completion = document.createElement("textarea");
   completion.name = "completion_text";
   completion.rows = 3;
-  completion.required = true;
-  completion.setAttribute("aria-label", "完成情况");
+  completion.setAttribute("aria-label", "完成说明（可空）");
+  const completionLabel = document.createElement("label");
+  completionLabel.className = "checkin-text-field";
+  completionLabel.append(textBlock("span", "完成说明（可空）"), completion);
 
   const difficulty = document.createElement("fieldset");
   difficulty.append(textBlock("legend", "主观难度"));
@@ -449,13 +451,16 @@ function projectCheckinForm(goalRecord) {
   const tomorrow = document.createElement("textarea");
   tomorrow.name = "tomorrow_direction";
   tomorrow.rows = 2;
-  tomorrow.setAttribute("aria-label", "明天方向");
+  tomorrow.setAttribute("aria-label", "明天方向（可空）");
+  const tomorrowLabel = document.createElement("label");
+  tomorrowLabel.className = "checkin-text-field";
+  tomorrowLabel.append(textBlock("span", "明天方向（可空）"), tomorrow);
 
   const button = document.createElement("button");
   button.className = "text-button";
   button.type = "submit";
   button.textContent = "保存该项目 check-in";
-  form.append(textBlock("h4", "Check-in"), status, completion, difficulty, tomorrow, button);
+  form.append(textBlock("h4", "Check-in"), status, completionLabel, difficulty, tomorrowLabel, button);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const body = checkinBodyFromForm(form, {
@@ -718,9 +723,8 @@ function historyCheckinForm(record, checkin) {
   const completion = document.createElement("textarea");
   completion.name = "completion_text";
   completion.rows = 3;
-  completion.required = true;
   completion.value = checkin.completion_text || "";
-  completion.setAttribute("aria-label", "完成情况");
+  completion.setAttribute("aria-label", "完成说明（可空）");
 
   const row = document.createElement("div");
   row.className = "history-edit-row";
@@ -754,7 +758,7 @@ function historyCheckinForm(record, checkin) {
   tomorrow.name = "tomorrow_direction";
   tomorrow.rows = 2;
   tomorrow.value = checkin.tomorrow_direction || "";
-  tomorrow.setAttribute("aria-label", "明天方向");
+  tomorrow.setAttribute("aria-label", "明天方向（可空）");
 
   const button = document.createElement("button");
   button.className = "text-button secondary";
@@ -952,11 +956,6 @@ function renderWeeklyVersions(versions) {
 
 function checkinBodyFromForm(form, options) {
   const completion = options.completionField.value.trim();
-  if (!completion) {
-    showAlert("完成情况不能为空。");
-    options.completionField.focus();
-    return null;
-  }
   const data = new FormData(form);
   const goalId = Number(options.goalId);
   return {

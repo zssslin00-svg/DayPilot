@@ -84,7 +84,7 @@ def update_ability_state_after_checkin(connection, checkin_id: int) -> Difficult
     if checkin is None:
         raise ValueError("checkin_id does not exist.")
 
-    parse_result = parse_completion_rate(str(checkin["completion_text"]))
+    parse_result = _parse_completion_rate_for_checkin(checkin)
     processor_snapshot = {
         "completion_parse_result": _parse_result_dict(parse_result),
         "source": "difficulty_controller.v1",
@@ -184,6 +184,26 @@ def update_ability_state_after_checkin(connection, checkin_id: int) -> Difficult
         ability_state=ability_state,
         completion_parse_result=_parse_result_dict(parse_result),
         difficulty_update_event=event,
+    )
+
+
+def _parse_completion_rate_for_checkin(checkin: dict[str, Any]) -> CompletionParseResult:
+    completion_text = str(checkin.get("completion_text") or "").strip()
+    if completion_text:
+        return parse_completion_rate(completion_text)
+
+    if str(checkin.get("completion_status") or "") == "completed":
+        return CompletionParseResult(
+            1.0,
+            "high",
+            "completion_status_completed",
+            "completion_status=completed",
+        )
+    return CompletionParseResult(
+        0.0,
+        "high",
+        "completion_status_incomplete",
+        "completion_status=incomplete",
     )
 
 

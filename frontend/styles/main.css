@@ -429,6 +429,36 @@ p {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.feedback-compact-form > textarea {
+  flex: 1 1 auto;
+  min-height: 142px;
+}
+
+.feedback-form {
+  grid-template-rows: auto minmax(150px, 1fr) auto;
+}
+
+.feedback-form > textarea {
+  height: 100%;
+  min-height: 140px;
+}
+
+.checkin-compact-form {
+  gap: 9px;
+}
+
+.checkin-compact-form .checkin-text-field {
+  gap: 5px;
+}
+
+.checkin-compact-form textarea {
+  min-height: 70px;
+}
+
+.checkin-compact-form textarea[name="tomorrow_direction"] {
+  min-height: 60px;
+}
+
 .metric-row {
   display: flex;
   flex-wrap: wrap;

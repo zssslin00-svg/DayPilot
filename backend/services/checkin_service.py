@@ -42,9 +42,6 @@ def save_daily_checkin(
         raise CheckinValidationError("非工作日不能提交每日 check-in。")
 
     completion_text = str(request_body.get("completion_text") or "").strip()
-    if not completion_text:
-        raise CheckinValidationError("completion_text 不能为空。")
-
     felt_difficulty = _parse_felt_difficulty(request_body.get("felt_difficulty"))
     completion_status = _parse_completion_status(request_body.get("completion_status"))
     tomorrow_direction = str(request_body.get("tomorrow_direction") or "").strip() or None
