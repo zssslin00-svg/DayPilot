@@ -172,7 +172,7 @@ prompts/                 目标生成 Prompt 和示例
 evals/                   Agent 行为评估用例、rubric 和脚本
 scripts/                 启动、停止、备份、恢复、连通性检查
 data/                    本地数据库、备份、临时文件和 LLM 日志
-docs/                    架构、实现、评估文档和 README 图片资产
+docs/                    README 图片资产和公开运行说明
 ```
 
 核心数据流：
@@ -272,6 +272,5 @@ scripts\restore_latest_db.bat
 ## 链接
 
 - [SOUL.example.md](SOUL.example.md)
-- [实现步骤指南](docs/implementation/step_5_14_acceptance_log.md)
 - [评估 Runbook](docs/evaluation/eval_runbook.md)
 - [一周试用 Runbook](docs/evaluation/one_week_trial_runbook.md)

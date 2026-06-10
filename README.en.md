@@ -172,7 +172,7 @@ prompts/                 Goal-generation prompts and examples
 evals/                   Agent behavior eval cases, rubrics, and scripts
 scripts/                 Start, stop, backup, restore, and connectivity checks
 data/                    Local database, backups, temporary files, and LLM logs
-docs/                    Architecture, implementation, evaluation docs, and README image assets
+docs/                    README image assets and public runbooks
 ```
 
 Core data flow:
@@ -272,6 +272,5 @@ scripts\restore_latest_db.bat
 ## Links
 
 - [SOUL.example.md](SOUL.example.md)
-- [Implementation Step Guide](docs/implementation/step_5_14_acceptance_log.md)
 - [Evaluation Runbook](docs/evaluation/eval_runbook.md)
 - [One-Week Trial Runbook](docs/evaluation/one_week_trial_runbook.md)
