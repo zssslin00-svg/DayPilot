@@ -91,7 +91,6 @@ function bindEvents() {
 async function loadInitialData() {
   hideAlert();
   await loadTodayGoal();
-  await loadHistory();
 }
 
 async function handleTodayRefresh() {
@@ -162,7 +161,7 @@ async function loadTodayGoal() {
 
   try {
     const payload = await requestJson("/api/today-goal");
-    renderTodayGoal(payload);
+    await renderTodayGoalAndSyncHistory(payload);
   } catch (error) {
     renderGoalEmpty("今日目标读取失败。");
     showAlert(errorMessage(error));
@@ -179,7 +178,7 @@ async function regenerateTodayGoal() {
 
   try {
     const payload = await requestJson("/api/today-goal/regenerate", { method: "POST" });
-    renderTodayGoal(payload);
+    await renderTodayGoalAndSyncHistory(payload);
   } catch (error) {
     renderGoalEmpty("今日目标重新生成失败。");
     showAlert(errorMessage(error));
@@ -273,6 +272,11 @@ async function handleProjectLifecycleSubmit(event) {
   } finally {
     setBusy(elements.projectSubmit, false);
   }
+}
+
+async function renderTodayGoalAndSyncHistory(payload) {
+  renderTodayGoal(payload);
+  await loadHistory();
 }
 
 function renderTodayGoal(payload) {
@@ -499,13 +503,14 @@ async function submitProjectGoalFeedback(goalRecord, textarea, button) {
     );
     if (index >= 0) {
       currentGoalRecords[index] = payload.updated_goal;
-      renderTodayGoal({
-        date: currentApiDate,
-        is_workday: true,
-        goals: currentGoalRecords,
-      });
+    } else {
+      currentGoalRecords = [payload.updated_goal];
     }
-    await loadHistory();
+    await renderTodayGoalAndSyncHistory({
+      date: currentApiDate,
+      is_workday: true,
+      goals: currentGoalRecords,
+    });
   } catch (error) {
     showAlert(errorMessage(error));
   } finally {
@@ -538,12 +543,11 @@ async function handleGoalFeedbackSubmit(event) {
       },
     });
     elements.feedbackMessage.value = "";
-    renderTodayGoal({
+    await renderTodayGoalAndSyncHistory({
       date: currentApiDate,
       is_workday: true,
       goal: payload.updated_goal,
     });
-    await loadHistory();
     const memoryUpdate = payload.memory_update || {};
     if (memoryUpdate.status === "failed") {
       showAlert(`目标已修正，但用户画像同步失败：${memoryUpdate.reason || "未知原因"}`);

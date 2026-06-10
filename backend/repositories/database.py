@@ -30,6 +30,7 @@ def initialize_database(
     with connection:
         connection.executescript(schema)
     _migrate_projects_status_completed(connection)
+    _migrate_projects_project_state(connection)
     _migrate_project_lifecycle_delete_action(connection)
     _migrate_project_scoped_daily_goals(connection)
     _migrate_project_checkins_completion_status(connection)
@@ -103,6 +104,74 @@ def _migrate_projects_status_completed(connection: sqlite3.Connection) -> None:
                 CREATE INDEX IF NOT EXISTS idx_projects_priority
                   ON projects(priority, status, id);
                 """
+            )
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")
+
+
+def _migrate_projects_project_state(connection: sqlite3.Connection) -> None:
+    """Move legacy project fields into canonical project_state and drop old columns."""
+
+    row = connection.execute(
+        """
+        SELECT sql
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'projects'
+        """
+    ).fetchone()
+    if row is None:
+        return
+    columns = _table_columns(connection, "projects")
+    legacy_columns = {"status_summary", "planning_bias", "source_payload"}
+    if "project_state" in columns and not (legacy_columns & columns):
+        return
+
+    rows = connection.execute("SELECT * FROM projects ORDER BY id").fetchall()
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        with connection:
+            connection.execute("DROP TABLE IF EXISTS projects_new")
+            connection.executescript(
+                """
+                CREATE TABLE projects_new (
+                  id INTEGER PRIMARY KEY,
+                  name TEXT NOT NULL UNIQUE,
+                  priority TEXT NOT NULL DEFAULT 'P2'
+                    CHECK (priority IN ('P0', 'P1', 'P2')),
+                  role TEXT NOT NULL DEFAULT '',
+                  status TEXT NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'paused', 'completed', 'archived')),
+                  project_state TEXT NOT NULL DEFAULT '{}',
+                  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                """
+            )
+            for item in rows:
+                data = dict(item)
+                connection.execute(
+                    """
+                    INSERT INTO projects_new (
+                      id, name, priority, role, status, project_state, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        data["id"],
+                        data["name"],
+                        data.get("priority", "P2"),
+                        data.get("role", ""),
+                        data.get("status", "active"),
+                        _project_state_json_from_project_row(data),
+                        data.get("created_at"),
+                        data.get("updated_at"),
+                    ),
+                )
+            connection.execute("DROP TABLE projects")
+            connection.execute("ALTER TABLE projects_new RENAME TO projects")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_projects_priority ON projects(priority, status, id)"
             )
     finally:
         connection.execute("PRAGMA foreign_keys = ON")
@@ -403,9 +472,24 @@ def _ensure_migration_project(connection: sqlite3.Connection) -> int:
         return int(row["id"])
     cursor = connection.execute(
         """
-        INSERT INTO projects (name, priority, role, status, status_summary, planning_bias, source_payload)
-        VALUES ('DayPilot 默认项目', 'P2', 'active', 'active', '', '', '{"source":"schema_migration"}')
-        """
+        INSERT INTO projects (name, priority, role, status, project_state)
+        VALUES (?, 'P2', 'active', 'active', ?)
+        """,
+        (
+            "DayPilot 榛樿椤圭洰",
+            json.dumps(
+                {
+                    "schema_version": "project_state.v1",
+                    "summary": "",
+                    "planning_guidance": "",
+                    "target_goal": "",
+                    "facts": [],
+                    "updated_from": {"source": "schema_migration"},
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        ),
     )
     return int(cursor.lastrowid)
 
@@ -443,6 +527,31 @@ def _decode_json_object(value: object) -> dict:
     except json.JSONDecodeError:
         return {}
     return decoded if isinstance(decoded, dict) else {}
+
+
+def _project_state_json_from_project_row(data: dict) -> str:
+    existing_state = _decode_json_object(data.get("project_state"))
+    legacy_payload = _decode_json_object(data.get("source_payload"))
+    summary = data.get("status_summary")
+    planning_guidance = data.get("planning_bias")
+    target_goal = legacy_payload.get("target_goal", existing_state.get("target_goal", ""))
+    state = {
+        "schema_version": existing_state.get("schema_version") or "project_state.v1",
+        "summary": str(summary if summary is not None else existing_state.get("summary", "") or "").strip(),
+        "planning_guidance": str(
+            planning_guidance
+            if planning_guidance is not None
+            else existing_state.get("planning_guidance", "")
+            or ""
+        ).strip(),
+        "target_goal": str(target_goal or "").strip(),
+        "facts": existing_state.get("facts") if isinstance(existing_state.get("facts"), list) else [],
+        "updated_from": {
+            "source": "schema_migration",
+            "legacy_payload_keys": sorted(str(key) for key in legacy_payload.keys()),
+        },
+    }
+    return json.dumps(state, ensure_ascii=False, separators=(",", ":"))
 
 
 def _completion_status_from_rate(value: object) -> str:

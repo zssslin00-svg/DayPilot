@@ -141,6 +141,45 @@ def test_projects_seed_from_profile_priorities() -> None:
         assert "日常生活需求" in by_id[5]["status_summary"]
 
 
+def test_seed_reuses_auto_default_project_when_profile_id_collides() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = Path(temp_dir) / "daypilot-project-id-collision.sqlite3"
+        connection = initialize_database(db_path)
+        try:
+            with connection:
+                repo.create_user_profile(
+                    connection,
+                    id=1,
+                    long_term_direction="Build a flexible personal work system.",
+                    goal_preferences={
+                        "project_priorities": [
+                            {
+                                "id": 1,
+                                "name": "Project from profile",
+                                "priority": "P0",
+                                "role": "main",
+                                "progress": "Profile project should replace the default row.",
+                                "planning_bias": "Prefer the profile project.",
+                            }
+                        ],
+                    },
+                )
+                repo.create_daily_goal(
+                    connection,
+                    goal_date="2026-06-08",
+                    context_snapshot={"source": "test"},
+                    generated_at="2026-06-08 09:00:00",
+                )
+                projects = ensure_projects_seeded(connection)
+        finally:
+            connection.close()
+
+        assert [project["id"] for project in projects] == [1]
+        assert projects[0]["name"] == "Project from profile"
+        assert projects[0]["status"] == "active"
+        assert projects[0]["status_summary"] == "Profile project should replace the default row."
+
+
 def test_mock_update_writes_event_and_updates_summary() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         db_path = Path(temp_dir) / "daypilot-project-progress.sqlite3"
@@ -286,6 +325,8 @@ def test_editing_same_checkin_supersedes_old_event() -> None:
                 checkin_id,
                 active_only=True,
             )
+            project5 = repo.get_project(connection, 5)
+            project2 = repo.get_project(connection, 2)
         finally:
             connection.close()
 
@@ -295,10 +336,23 @@ def test_editing_same_checkin_supersedes_old_event() -> None:
         assert len(active_events) == 1
         assert all_events[0]["event_status"] == "superseded"
         assert active_events[0]["project_id"] == 2
+        assert not [
+            fact
+            for fact in project5["project_state"]["facts"]
+            if fact.get("source_type") == "daily_checkin" and fact.get("source_id") == checkin_id
+        ]
+        assert len(
+            [
+                fact
+                for fact in project2["project_state"]["facts"]
+                if fact.get("source_type") == "daily_checkin" and fact.get("source_id") == checkin_id
+            ]
+        ) == 1
 
 
 def main() -> None:
     test_projects_seed_from_profile_priorities()
+    test_seed_reuses_auto_default_project_when_profile_id_collides()
     test_mock_update_writes_event_and_updates_summary()
     test_low_confidence_deepseek_output_still_updates_summary()
     test_invalid_deepseek_output_falls_back_to_mock_update()

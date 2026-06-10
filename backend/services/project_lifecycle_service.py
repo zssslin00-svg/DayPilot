@@ -211,6 +211,17 @@ Do not invent completion or project details that the message does not support.
                     "status_summary": "current status/progress summary, empty if not stated",
                     "planning_bias": "planning guidance, empty if not stated",
                     "target_goal": "explicit target goal, empty if not stated",
+                    "project_state_patch": {
+                        "summary": "current status/progress summary, empty if not stated",
+                        "planning_guidance": "planning guidance, empty if not stated",
+                        "target_goal": "explicit target goal, empty if not stated",
+                        "facts": [
+                            {
+                                "type": "progress|decision|constraint|next_step|artifact|risk|open_question|context",
+                                "text": "one concise fact from the message",
+                            }
+                        ],
+                    },
                     "completion_summary": "completion result, only for complete_project",
                     "today_goal_policy": "keep|refresh|create|remove",
                     "confidence": "0..1",
@@ -230,8 +241,9 @@ Do not invent completion or project details that the message does not support.
             "Return one item per affected project. If multiple projects are mentioned, include multiple items.",
             "For create_project, default priority to P2 unless the user says P0, P1, or P2.",
             "For complete_project, update_project, or delete_project, choose an existing project_id when possible.",
-            "Set today_goal_policy to create for new projects, remove for completed/deleted projects, refresh for meaningful progress/target/priority changes, and keep for pure renames.",
+            "Set today_goal_policy to create for new projects, remove for completed/deleted projects, refresh for project name/progress/target/priority changes, and keep only for no current-state change.",
             "Use concise Chinese for status_summary and planning_bias.",
+            "Prefer project_state_patch as the canonical current project state update; status_summary/planning_bias/target_goal are backward-compatible mirrors.",
         ],
         "message": context["message"],
         "active_projects": context["active_projects"],
@@ -266,15 +278,26 @@ def _normalize_lifecycle_output(output: dict[str, Any]) -> dict[str, Any]:
     confidence = _clamp_float(output.get("confidence"), 0.0, 1.0)
     project_id = _safe_positive_int(output.get("project_id"))
     today_goal_policy = _normalize_today_goal_policy(output.get("today_goal_policy"), action)
+    status_summary = str(output.get("status_summary") or output.get("progress") or "").strip()
+    planning_bias = str(output.get("planning_bias") or "").strip()
+    target_goal = str(output.get("target_goal") or "").strip()
     return {
         "action": action,
         "project_id": project_id,
         "project_name": str(output.get("project_name") or "").strip(),
         "priority": priority,
         "priority_explicit": priority_explicit,
-        "status_summary": str(output.get("status_summary") or output.get("progress") or "").strip(),
-        "planning_bias": str(output.get("planning_bias") or "").strip(),
-        "target_goal": str(output.get("target_goal") or "").strip(),
+        "status_summary": status_summary,
+        "planning_bias": planning_bias,
+        "target_goal": target_goal,
+        "project_state_patch": _normalize_project_state_patch(
+            output.get("project_state_patch"),
+            status_summary=status_summary,
+            planning_bias=planning_bias,
+            target_goal=target_goal,
+            completion_summary=str(output.get("completion_summary") or "").strip(),
+            action=action,
+        ),
         "completion_summary": str(output.get("completion_summary") or "").strip(),
         "today_goal_policy": today_goal_policy,
         "confidence": confidence,
@@ -628,10 +651,12 @@ def _final_today_goal_policy(item: dict[str, Any], result: dict[str, Any]) -> st
 
 def _project_state_changed_for_goal(result: dict[str, Any]) -> bool:
     pairs = [
+        ("previous_project_name", "new_project_name"),
         ("previous_status_summary", "new_status_summary"),
         ("previous_planning_bias", "new_planning_bias"),
         ("previous_priority", "new_priority"),
         ("previous_target_goal", "new_target_goal"),
+        ("previous_project_state_hash", "new_project_state_hash"),
     ]
     for previous_key, new_key in pairs:
         if _diff_value(result.get(previous_key)) != _diff_value(result.get(new_key)):
@@ -725,6 +750,8 @@ def _apply_create_project(connection: sqlite3.Connection, output: dict[str, Any]
             "project_id": updated["id"] if updated else existing["id"],
             "project_name": project_name,
             "priority": priority,
+            "previous_project_name": existing.get("name"),
+            "new_project_name": project_name,
             "previous_status": existing.get("status"),
             "new_status": "active",
             "previous_status_summary": previous_summary,
@@ -735,6 +762,8 @@ def _apply_create_project(connection: sqlite3.Connection, output: dict[str, Any]
             "new_priority": priority,
             "previous_target_goal": previous_target_goal,
             "new_target_goal": next_target_goal,
+            "previous_project_state_hash": repo.project_state_hash(existing),
+            "new_project_state_hash": repo.project_state_hash(updated or existing),
             "planning_bias": next_planning_bias,
             "message": "项目已存在，已更新为当前项目。",
         }
@@ -758,6 +787,8 @@ def _apply_create_project(connection: sqlite3.Connection, output: dict[str, Any]
         "project_id": project_id,
         "project_name": project_name,
         "priority": output["priority"],
+        "previous_project_name": None,
+        "new_project_name": project_name,
         "previous_status": None,
         "new_status": "active",
         "previous_status_summary": None,
@@ -768,6 +799,8 @@ def _apply_create_project(connection: sqlite3.Connection, output: dict[str, Any]
         "new_priority": output["priority"],
         "previous_target_goal": None,
         "new_target_goal": output.get("target_goal") or "",
+        "previous_project_state_hash": None,
+        "new_project_state_hash": repo.project_state_hash(project),
         "planning_bias": planning_bias,
         "message": "项目已新增。",
     }
@@ -835,6 +868,8 @@ def _apply_update_project(connection: sqlite3.Connection, output: dict[str, Any]
         "project_id": project["id"],
         "project_name": next_name,
         "priority": (updated or project).get("priority"),
+        "previous_project_name": project.get("name"),
+        "new_project_name": next_name,
         "previous_status": project.get("status"),
         "new_status": (updated or project).get("status"),
         "previous_status_summary": previous_summary,
@@ -845,6 +880,8 @@ def _apply_update_project(connection: sqlite3.Connection, output: dict[str, Any]
         "new_priority": priority,
         "previous_target_goal": previous_target_goal,
         "new_target_goal": target_goal,
+        "previous_project_state_hash": repo.project_state_hash(project),
+        "new_project_state_hash": repo.project_state_hash(updated or project),
         "planning_bias": planning_bias,
         "message": "项目信息已更新。",
     }
@@ -1194,16 +1231,49 @@ def _source_payload(
             "progress": status_summary,
             "planning_bias": planning_bias,
             "target_goal": output.get("target_goal") or payload.get("target_goal") or "",
+            "project_state_patch": output.get("project_state_patch") or payload.get("project_state_patch") or {},
         }
     )
     return payload
 
 
+def _normalize_project_state_patch(
+    raw_patch: Any,
+    *,
+    status_summary: str,
+    planning_bias: str,
+    target_goal: str,
+    completion_summary: str,
+    action: str,
+) -> dict[str, Any]:
+    patch = dict(raw_patch) if isinstance(raw_patch, dict) else {}
+    if action == "complete_project" and completion_summary and not str(patch.get("summary") or "").strip():
+        patch["summary"] = completion_summary
+    elif status_summary and not str(patch.get("summary") or "").strip():
+        patch["summary"] = status_summary
+    if planning_bias and not str(patch.get("planning_guidance") or "").strip():
+        patch["planning_guidance"] = planning_bias
+    if target_goal and not str(patch.get("target_goal") or "").strip():
+        patch["target_goal"] = target_goal
+    facts = patch.get("facts")
+    if not isinstance(facts, list):
+        facts = []
+    normalized_facts: list[dict[str, Any]] = []
+    for item in facts:
+        if not isinstance(item, dict):
+            continue
+        fact = {
+            "type": str(item.get("type") or "context").strip(),
+            "text": str(item.get("text") or item.get("summary") or "").strip(),
+        }
+        if fact["text"]:
+            normalized_facts.append(fact)
+    patch["facts"] = normalized_facts
+    return patch
+
+
 def _target_goal_from_project(project: dict[str, Any]) -> str:
-    payload = project.get("source_payload") or {}
-    if not isinstance(payload, dict):
-        return ""
-    return str(payload.get("target_goal") or "").strip()
+    return repo.project_target_goal(project)
 
 
 def _project_payload(project: dict[str, Any] | None) -> dict[str, Any] | None:

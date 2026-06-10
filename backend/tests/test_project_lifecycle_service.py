@@ -586,15 +586,15 @@ def test_project_lifecycle_refreshes_today_goal_only_for_meaningful_project_stat
                 os.environ["DAYPILOT_LLM_MODE"] = original_mode
 
         assert rename_result["status"] == "applied"
-        assert rename_result["items"][0]["today_goal_policy"] == "keep"
-        assert rename_result["items"][0]["today_goal_refresh"] == "kept"
+        assert rename_result["items"][0]["today_goal_policy"] == "refresh"
+        assert rename_result["items"][0]["today_goal_refresh"] == "refreshed"
         assert progress_result["status"] == "applied"
         assert progress_result["items"][0]["today_goal_policy"] == "refresh"
         assert progress_result["items"][0]["today_goal_refresh"] == "refreshed"
 
         connection = initialize_database(db_path)
         try:
-            assert _goal_version_count(connection, project_id=5, goal_date="2026-06-09") == 2
+            assert _goal_version_count(connection, project_id=5, goal_date="2026-06-09") == 3
             assert _goal_version_count(connection, project_id=6, goal_date="2026-06-09") == 1
             active_goal = repo.get_goal_with_active_version_by_date_and_project(connection, "2026-06-09", 5)
         finally:

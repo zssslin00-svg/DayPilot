@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 from datetime import date, datetime
 from typing import Any, Iterable, Mapping
@@ -30,9 +31,7 @@ TABLE_COLUMNS: dict[str, set[str]] = {
         "priority",
         "role",
         "status",
-        "status_summary",
-        "planning_bias",
-        "source_payload",
+        "project_state",
         "created_at",
         "updated_at",
     },
@@ -262,7 +261,7 @@ JSON_FIELDS: dict[str, set[str]] = {
         "avoid_patterns",
         "workday_rule",
     },
-    "projects": {"source_payload"},
+    "projects": {"project_state"},
     "daily_goals": {"context_snapshot"},
     "goal_versions": {"success_criteria", "critic_result"},
     "daily_checkins": {
@@ -311,6 +310,135 @@ UPDATED_AT_TABLES = {
     "weekly_focus",
 }
 
+PROJECT_STATE_SCHEMA_VERSION = "project_state.v1"
+PROJECT_FACT_TYPES = {
+    "progress",
+    "decision",
+    "constraint",
+    "next_step",
+    "artifact",
+    "risk",
+    "open_question",
+    "context",
+}
+
+
+def normalize_project_state(value: Any, **overrides: Any) -> dict[str, Any]:
+    """Return a canonical project_state object with stable keys."""
+
+    state = _decode_json_mapping(value)
+    summary = overrides.get("summary", state.get("summary"))
+    planning_guidance = overrides.get(
+        "planning_guidance",
+        state.get("planning_guidance", state.get("planning_bias")),
+    )
+    target_goal = overrides.get("target_goal", state.get("target_goal"))
+    facts = overrides.get("facts", state.get("facts"))
+    updated_from = overrides.get("updated_from", state.get("updated_from"))
+    return {
+        "schema_version": str(state.get("schema_version") or PROJECT_STATE_SCHEMA_VERSION),
+        "summary": str(summary or "").strip(),
+        "planning_guidance": str(planning_guidance or "").strip(),
+        "target_goal": str(target_goal or "").strip(),
+        "facts": _normalize_project_facts(facts),
+        "updated_from": updated_from if isinstance(updated_from, dict) else {},
+    }
+
+
+def project_state_from_legacy(
+    *,
+    status_summary: Any = "",
+    planning_bias: Any = "",
+    source_payload: Any = None,
+    existing_state: Any = None,
+    updated_from: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = _decode_json_mapping(source_payload)
+    state = normalize_project_state(existing_state)
+    target_goal = payload.get("target_goal", state.get("target_goal"))
+    state = normalize_project_state(
+        state,
+        summary=status_summary if status_summary is not None else state.get("summary"),
+        planning_guidance=planning_bias if planning_bias is not None else state.get("planning_guidance"),
+        target_goal=target_goal,
+        updated_from=updated_from
+        or {
+            "source": "legacy_project_fields",
+            "payload_keys": sorted(str(key) for key in payload.keys()),
+        },
+    )
+    patch = payload.get("project_state_patch")
+    if isinstance(patch, Mapping):
+        state = merge_project_state(state, patch)
+    return state
+
+
+def merge_project_state(
+    existing_state: Any,
+    patch: Mapping[str, Any] | None,
+    *,
+    updated_from: dict[str, Any] | None = None,
+    replace_source_facts: bool = False,
+    source_type: str | None = None,
+    source_id: int | str | None = None,
+) -> dict[str, Any]:
+    state = normalize_project_state(existing_state)
+    patch_data = dict(patch or {})
+    if replace_source_facts and source_type and source_id is not None:
+        state["facts"] = [
+            fact
+            for fact in state["facts"]
+            if not (
+                str(fact.get("source_type") or "") == str(source_type)
+                and str(fact.get("source_id") or "") == str(source_id)
+            )
+        ]
+    for key in ("summary", "planning_guidance", "target_goal"):
+        if key in patch_data:
+            state[key] = str(patch_data.get(key) or "").strip()
+    facts = _normalize_project_facts(patch_data.get("facts"))
+    if source_type and source_id is not None:
+        for fact in facts:
+            fact.setdefault("source_type", source_type)
+            fact.setdefault("source_id", source_id)
+    if facts:
+        state["facts"].extend(facts)
+    patch_source = patch_data.get("updated_from")
+    if updated_from is not None:
+        state["updated_from"] = updated_from
+    elif isinstance(patch_source, dict):
+        state["updated_from"] = patch_source
+    return normalize_project_state(state)
+
+
+def project_status_summary(project: Mapping[str, Any] | None) -> str:
+    if project is None:
+        return ""
+    return normalize_project_state(project.get("project_state")).get("summary", "")
+
+
+def project_planning_bias(project: Mapping[str, Any] | None) -> str:
+    if project is None:
+        return ""
+    return normalize_project_state(project.get("project_state")).get("planning_guidance", "")
+
+
+def project_target_goal(project: Mapping[str, Any] | None) -> str:
+    if project is None:
+        return ""
+    return normalize_project_state(project.get("project_state")).get("target_goal", "")
+
+
+def project_state_hash(project_or_state: Mapping[str, Any] | None) -> str:
+    value: Any
+    if isinstance(project_or_state, Mapping) and "project_state" in project_or_state:
+        value = project_or_state.get("project_state")
+    else:
+        value = project_or_state
+    state = normalize_project_state(value)
+    payload = json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
 
 def create_user_profile(connection: sqlite3.Connection, **profile: Any) -> int:
     return _insert(connection, "user_profile", profile)
@@ -325,7 +453,7 @@ def update_user_profile(connection: sqlite3.Connection, profile_id: int = 1, **c
 
 
 def create_project(connection: sqlite3.Connection, **project: Any) -> int:
-    return _insert(connection, "projects", project)
+    return _insert(connection, "projects", _prepare_project_record(project, for_insert=True))
 
 
 def get_project(connection: sqlite3.Connection, project_id: int) -> Record | None:
@@ -342,7 +470,8 @@ def get_project_by_name(connection: sqlite3.Connection, name: str) -> Record | N
 
 
 def update_project(connection: sqlite3.Connection, project_id: int, **changes: Any) -> Record | None:
-    return _update(connection, "projects", project_id, changes)
+    existing = get_project(connection, project_id)
+    return _update(connection, "projects", project_id, _prepare_project_record(changes, existing=existing))
 
 
 def delete_project(connection: sqlite3.Connection, project_id: int) -> Record | None:
@@ -1186,13 +1315,48 @@ def _ensure_default_project(connection: sqlite3.Connection) -> int:
     row = connection.execute("SELECT id FROM projects ORDER BY id LIMIT 1").fetchone()
     if row is not None:
         return int(row["id"])
-    cursor = connection.execute(
-        """
-        INSERT INTO projects (name, priority, role, status, status_summary, planning_bias, source_payload)
-        VALUES ('DayPilot 默认项目', 'P2', 'active', 'active', '', '', '{"source":"repository_default"}')
-        """
+    return create_project(
+        connection,
+        name="DayPilot 榛樿椤圭洰",
+        priority="P2",
+        role="active",
+        status="active",
+        project_state=normalize_project_state(
+            {},
+            updated_from={"source": "repository_default"},
+        ),
     )
-    return int(cursor.lastrowid)
+
+
+def _prepare_project_record(
+    record: Mapping[str, Any],
+    *,
+    existing: Mapping[str, Any] | None = None,
+    for_insert: bool = False,
+) -> dict[str, Any]:
+    data = dict(record)
+    legacy_summary_present = "status_summary" in data
+    legacy_planning_present = "planning_bias" in data
+    legacy_payload_present = "source_payload" in data
+    legacy_summary = data.pop("status_summary", None)
+    legacy_planning = data.pop("planning_bias", None)
+    legacy_payload = data.pop("source_payload", None)
+    state_present = "project_state" in data
+    if not (for_insert or state_present or legacy_summary_present or legacy_planning_present or legacy_payload_present):
+        return data
+
+    raw_state = data.pop("project_state", existing.get("project_state") if existing else None)
+    if legacy_summary_present or legacy_planning_present or legacy_payload_present:
+        state = project_state_from_legacy(
+            status_summary=legacy_summary if legacy_summary_present else None,
+            planning_bias=legacy_planning if legacy_planning_present else None,
+            source_payload=legacy_payload if legacy_payload_present else None,
+            existing_state=raw_state,
+        )
+    else:
+        state = normalize_project_state(raw_state)
+    data["project_state"] = state
+    return data
 
 
 def _insert(connection: sqlite3.Connection, table: str, record: Mapping[str, Any]) -> int:
@@ -1270,7 +1434,56 @@ def _decode_row(table: str, row: sqlite3.Row) -> Record:
     for column in JSON_FIELDS.get(table, set()):
         if column in record and record[column] is not None:
             record[column] = json.loads(record[column])
+    if table == "projects":
+        record = _materialize_project_record(record)
     return record
+
+
+def _materialize_project_record(record: Record) -> Record:
+    state = normalize_project_state(record.get("project_state"))
+    record["project_state"] = state
+    record["status_summary"] = state["summary"]
+    record["planning_bias"] = state["planning_guidance"]
+    updated_from = state.get("updated_from") if isinstance(state.get("updated_from"), dict) else {}
+    record["source_payload"] = {
+        "project_state": state,
+        "progress": state["summary"],
+        "planning_bias": state["planning_guidance"],
+        "target_goal": state["target_goal"],
+        "name": record.get("name") or "",
+        "source": updated_from.get("source") or "derived_project_state",
+    }
+    return record
+
+
+def _decode_json_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return dict(decoded) if isinstance(decoded, Mapping) else {}
+
+
+def _normalize_project_facts(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    facts: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        fact = dict(item)
+        fact_type = str(fact.get("type") or "context").strip()
+        fact["type"] = fact_type if fact_type in PROJECT_FACT_TYPES else "context"
+        text = str(fact.get("text") or fact.get("summary") or "").strip()
+        if text:
+            fact["text"] = text
+        fact.pop("summary", None)
+        facts.append(fact)
+    return facts
 
 
 def _validate_columns(table: str, columns: Iterable[str]) -> None:

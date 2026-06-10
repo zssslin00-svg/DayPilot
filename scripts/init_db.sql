@@ -23,9 +23,7 @@ CREATE TABLE IF NOT EXISTS projects (
   role TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'active'
     CHECK (status IN ('active', 'paused', 'completed', 'archived')),
-  status_summary TEXT NOT NULL DEFAULT '',
-  planning_bias TEXT NOT NULL DEFAULT '',
-  source_payload TEXT NOT NULL DEFAULT '{}',
+  project_state TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

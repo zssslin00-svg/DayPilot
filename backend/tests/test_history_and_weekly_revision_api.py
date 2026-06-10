@@ -144,6 +144,45 @@ def test_history_reads_existing_records_without_generating_goal() -> None:
             connection.close()
 
 
+def test_history_reflects_latest_active_goal_version() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = Path(temp_dir) / "history-active-version.sqlite3"
+        seeded = _seed_workweek(db_path)
+        goal_id = seeded["goal_by_date"]["2026-06-12"]
+
+        connection = connect_database(db_path)
+        try:
+            with connection:
+                repo.create_goal_version(
+                    connection,
+                    daily_goal_id=goal_id,
+                    version_no=2,
+                    is_active=1,
+                    main_goal="Updated active goal shown in history.",
+                    goal_reason="History should track the current active version.",
+                    success_criteria=["History uses v2", "Old v1 stays as audit only"],
+                    estimated_minutes=60,
+                    difficulty_level=2,
+                    minimum_version="History record displays v2.",
+                    stretch_challenge="Keep old version available in version chain.",
+                    goal_type="coding",
+                    revision_source="system_regeneration",
+                    revision_reason="Test latest active goal sync.",
+                )
+        finally:
+            connection.close()
+
+        status, payload = _request(db_path, "GET", "/api/history?days=7")
+
+        assert status == 200
+        latest = payload["daily_records"][0]
+        assert latest["daily_goal"]["goal_date"] == "2026-06-12"
+        assert latest["active_version"]["version_no"] == 2
+        assert latest["goal_output"]["main_goal"] == "Updated active goal shown in history."
+        assert latest["goal_versions"][0]["version_no"] == 1
+        assert latest["goal_versions"][1]["version_no"] == 2
+
+
 def test_weekly_report_feedback_creates_version_chain() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         db_path = Path(temp_dir) / "weekly-feedback.sqlite3"
@@ -310,6 +349,7 @@ def _seed_workweek(db_path: Path) -> dict[str, Any]:
 
 def main() -> None:
     test_history_reads_existing_records_without_generating_goal()
+    test_history_reflects_latest_active_goal_version()
     test_weekly_report_feedback_creates_version_chain()
     test_editing_checkin_refreshes_existing_weekly_report()
     print("PASS: history, weekly report feedback, and check-in refresh APIs verified")

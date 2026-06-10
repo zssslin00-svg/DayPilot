@@ -621,8 +621,8 @@ def test_multi_project_generation_and_next_day_carryover() -> None:
         ]
         assert len(carried_goals) == 1
         carried_output = carried_goals[0]["goal_output"]
-        assert not carried_output["main_goal"].startswith("继续完成")
-        assert "未完成目标：" not in carried_output["main_goal"]
+        assert carried_output["main_goal"].startswith("继续完成")
+        assert "Beta project" in carried_output["main_goal"]
         assert carried_output["context_used"]["primary_driver"] == "recent_unfinished_work"
 
 

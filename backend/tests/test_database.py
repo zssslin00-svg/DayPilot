@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import sys
 import tempfile
 from pathlib import Path
@@ -271,9 +272,69 @@ def test_example_workweek_seed_and_queries() -> None:
             connection.close()
 
 
+def test_legacy_project_columns_migrate_to_project_state() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = Path(temp_dir) / "legacy-project-state.sqlite3"
+        legacy = sqlite3.connect(db_path)
+        try:
+            legacy.executescript(
+                """
+                CREATE TABLE projects (
+                  id INTEGER PRIMARY KEY,
+                  name TEXT NOT NULL UNIQUE,
+                  priority TEXT NOT NULL DEFAULT 'P2'
+                    CHECK (priority IN ('P0', 'P1', 'P2')),
+                  role TEXT NOT NULL DEFAULT '',
+                  status TEXT NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'paused', 'completed', 'archived')),
+                  status_summary TEXT NOT NULL DEFAULT '',
+                  planning_bias TEXT NOT NULL DEFAULT '',
+                  source_payload TEXT NOT NULL DEFAULT '{}',
+                  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                INSERT INTO projects (
+                  id, name, priority, role, status, status_summary, planning_bias, source_payload
+                )
+                VALUES (
+                  7,
+                  'Rule orchestration',
+                  'P0',
+                  'main',
+                  'active',
+                  'Confirming ruleset orchestration design.',
+                  'Prefer data structure and minimal validation tasks.',
+                  '{"target_goal":"Deliver flexible rule orchestration.","other":"ignored"}'
+                );
+                """
+            )
+        finally:
+            legacy.close()
+
+        connection = initialize_database(db_path)
+        try:
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(projects)").fetchall()
+            }
+            assert "project_state" in columns
+            assert "status_summary" not in columns
+            assert "planning_bias" not in columns
+            assert "source_payload" not in columns
+
+            project = repo.get_project(connection, 7)
+            assert project["name"] == "Rule orchestration"
+            assert project["status_summary"] == "Confirming ruleset orchestration design."
+            assert project["planning_bias"] == "Prefer data structure and minimal validation tasks."
+            assert project["project_state"]["target_goal"] == "Deliver flexible rule orchestration."
+        finally:
+            connection.close()
+
+
 def main() -> None:
     test_schema_and_repository_crud()
     test_example_workweek_seed_and_queries()
+    test_legacy_project_columns_migrate_to_project_state()
     print("PASS: database schema, repositories, seed data, and required queries verified")
 
 

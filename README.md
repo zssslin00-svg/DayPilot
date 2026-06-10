@@ -242,6 +242,14 @@ Windows 也可以使用：
 scripts\restore_latest_db.bat
 ```
 
+## 当前数据模型与同步规则
+
+- 项目当前状态只以 `projects.project_state` 为准；`status_summary`、`planning_bias`、`source_payload` 不再作为 `projects` 表的持久列。API 为了兼容前端仍返回 `status_summary` 和 `planning_bias`，但它们是从 `project_state.summary` 和 `project_state.planning_guidance` 实时派生的。
+- `project_state` 记录项目摘要、规划指导、目标、事实列表和最近更新来源。项目更新、check-in 自动进度和旧数据迁移都会写入这个 canonical state，避免项目名、进度或目标被历史字段反向覆盖。
+- 项目名、项目摘要、规划指导、目标或优先级变化后，会触发当天对应项目的今日目标刷新。强制刷新不会 carry over 旧目标；普通 carry-over 也会用当前项目名重写目标标题。
+- History 区展示每个 `daily_goal` 当前的 active goal version。只要今日目标生成、重新生成或反馈修正产生新的 active version，前端会同步刷新 History；旧版本只保留在版本链里做审计。
+- 同一个 check-in 被编辑后，系统会替换同一 `source_type + source_id` 产生的项目进度 facts，避免旧 check-in 内容继续影响项目当前状态。
+
 ## API Surface
 
 - `GET /health`

@@ -554,11 +554,7 @@ def _build_generation_context(
         if item.get("daily_checkin") is not None
     ]
     recent_feedback = repo.list_recent_feedback_messages(connection, goal_date, limit=20)
-    recent_project_progress = repo.list_recent_project_progress_events(
-        connection,
-        project_id=project_id,
-        limit=5,
-    )
+    recent_project_progress: list[dict[str, Any]] = []
     weekly_focus = repo.list_weekly_focus_by_target_week(connection, week_id)
     if not weekly_focus:
         weekly_focus = repo.list_recent_weekly_focus(connection, limit=5)
@@ -633,6 +629,7 @@ def _context_snapshot(context: dict[str, Any], goal_output: dict[str, Any]) -> d
         "ability_state_id": context["ability_state"]["id"],
         "project_id": context["project"]["id"],
         "project_name": context["project"]["name"],
+        "project_state_hash": repo.project_state_hash(context["project"]),
         "recent_daily_goal_ids": [
             item["daily_goal"]["id"] for item in context["recent_daily_goals"]
         ],
@@ -729,7 +726,10 @@ def _carry_over_goal_output(
     carried = dict(output)
     project_name = str(project.get("name") or "当前项目")
     carried["goal_date"] = today.isoformat()
-    carried["main_goal"] = _compact_text(_strip_carryover_prefix(str(output["main_goal"])), 120)
+    carried["main_goal"] = _compact_text(
+        f"继续完成「{project_name}」未完成目标：{_strip_carryover_prefix(str(output['main_goal']))}",
+        120,
+    )
     carried["rationale"] = _compact_text(
         f"该项目上一工作日目标尚未完成，今天先承接完成，再生成新的推进目标。{output.get('rationale') or ''}",
         260,

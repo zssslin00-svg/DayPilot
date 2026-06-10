@@ -108,6 +108,9 @@ def test_refresh_today_goal_for_project_keeps_or_refreshes_only_target_project()
         finally:
             connection.close()
         assert active_goal["active_version"]["revision_source"] == "system_regeneration"
+        assert active_goal["daily_goal"]["context_snapshot"]["project_state_hash"] == repo.project_state_hash(
+            active_goal["project"]
+        )
 
 
 def test_refresh_today_goal_for_project_skips_non_workday() -> None:

@@ -40,11 +40,14 @@ def ensure_projects_seeded(connection: sqlite3.Connection) -> list[dict[str, Any
     ) or (isinstance(current_projects, list) and bool(current_projects))
     if projects and not (_only_auto_default_projects(projects) and has_profile_projects):
         return repo.list_projects(connection)
+    auto_default_by_id: dict[int, dict[str, Any]] = {}
     if projects and _only_auto_default_projects(projects) and has_profile_projects:
+        auto_default_by_id = {int(project["id"]): project for project in projects}
         for project in projects:
             repo.update_project(connection, int(project["id"]), status="archived")
 
     if isinstance(priority_items, list) and priority_items:
+        used_project_ids: set[int] = set()
         for index, item in enumerate(priority_items, start=1):
             if not isinstance(item, dict):
                 continue
@@ -52,17 +55,24 @@ def ensure_projects_seeded(connection: sqlite3.Connection) -> list[dict[str, Any
             if not name:
                 continue
             project_id = _safe_positive_int(item.get("id")) or index
-            repo.create_project(
-                connection,
-                id=project_id,
-                name=name,
-                priority=_valid_priority(item.get("priority")),
-                role=str(item.get("role") or "").strip(),
-                status="active",
-                status_summary=str(item.get("progress") or "").strip(),
-                planning_bias=str(item.get("planning_bias") or "").strip(),
-                source_payload=item,
-            )
+            project_data = {
+                "name": name,
+                "priority": _valid_priority(item.get("priority")),
+                "role": str(item.get("role") or "").strip(),
+                "status": "active",
+                "status_summary": str(item.get("progress") or "").strip(),
+                "planning_bias": str(item.get("planning_bias") or "").strip(),
+                "source_payload": item,
+            }
+            if project_id in auto_default_by_id and project_id not in used_project_ids:
+                repo.update_project(connection, project_id, **project_data)
+                used_project_ids.add(project_id)
+                continue
+            if repo.get_project(connection, project_id) is None and project_id not in used_project_ids:
+                repo.create_project(connection, id=project_id, **project_data)
+                used_project_ids.add(project_id)
+                continue
+            repo.create_project(connection, **project_data)
         return repo.list_projects(connection)
 
     if isinstance(current_projects, list):
@@ -92,6 +102,8 @@ def _only_auto_default_projects(projects: list[dict[str, Any]]) -> bool:
 def _is_auto_default_project(project: dict[str, Any]) -> bool:
     payload = project.get("source_payload") or {}
     source = payload.get("source") if isinstance(payload, dict) else None
+    if source in {"repository_default", "schema_migration"}:
+        return True
     return str(project.get("name") or "") == "DayPilot 默认项目" and source in {
         "repository_default",
         "schema_migration",
@@ -160,11 +172,14 @@ class MockProjectProgressLLMAdapter:
     def generate(self, context: dict[str, Any]) -> dict[str, Any]:
         projects = context["projects"]
         checkin_text = _checkin_text(context)
-        selected = (
-            _select_project_by_text(projects, checkin_text)
-            or _select_project_by_text(projects, _context_text(context))
-            or projects[0]
+        daily_goal_project = context.get("daily_goal_project") or {}
+        active_project_ids = {int(project["id"]) for project in projects}
+        default_project = (
+            daily_goal_project
+            if daily_goal_project and int(daily_goal_project.get("id") or 0) in active_project_ids
+            else None
         )
+        selected = _select_project_by_text(projects, checkin_text) or default_project or projects[0]
         progress_delta = _compact_sentence(
             context["checkin"].get("completion_text")
             or context["active_version"].get("main_goal")
@@ -193,16 +208,21 @@ def _build_progress_context(db_path: str | Path, checkin_id: int) -> dict[str, A
         daily_goal = repo.get_daily_goal(connection, int(checkin["daily_goal_id"]))
         if daily_goal is None:
             raise ProjectProgressUpdateError("daily_goal_not_found")
+        daily_goal_project = repo.get_project(connection, int(daily_goal["project_id"]))
         active_version = (
             repo.get_goal_version(connection, int(daily_goal["active_version_id"]))
             if daily_goal.get("active_version_id") is not None
             else None
         )
         projects = repo.list_projects(connection)
+        active_project_ids = {int(project["id"]) for project in projects}
+        if daily_goal_project is not None and int(daily_goal_project["id"]) not in active_project_ids:
+            daily_goal_project = None
         recent_events = repo.list_recent_project_progress_events(connection, limit=10)
         return {
             "checkin": checkin,
             "daily_goal": daily_goal,
+            "daily_goal_project": daily_goal_project,
             "active_version": active_version or {},
             "projects": projects,
             "recent_project_progress_events": recent_events,
@@ -246,6 +266,20 @@ def _persist_progress_update(
             new_summary = str(output.get("new_status_summary") or "").strip()
             if not new_summary:
                 new_summary = _merge_summary(previous_summary, output["progress_delta"])
+            state_patch = output.get("project_state_patch") or {}
+            if not str(state_patch.get("summary") or "").strip():
+                state_patch["summary"] = new_summary
+            facts = list(state_patch.get("facts") or [])
+            facts.append(
+                {
+                    "type": "progress",
+                    "text": output["progress_delta"],
+                    "source_type": "daily_checkin",
+                    "source_id": checkin_id,
+                    "evidence_text": output["evidence_text"],
+                }
+            )
+            state_patch["facts"] = facts
 
             event_id = repo.create_project_progress_event(
                 connection,
@@ -267,7 +301,18 @@ def _persist_progress_update(
             updated_project = repo.update_project(
                 connection,
                 int(project["id"]),
-                status_summary=new_summary,
+                project_state=repo.merge_project_state(
+                    project.get("project_state"),
+                    state_patch,
+                    updated_from={
+                        "source": "project_progress",
+                        "source_type": "daily_checkin",
+                        "source_id": checkin_id,
+                    },
+                    replace_source_facts=True,
+                    source_type="daily_checkin",
+                    source_id=checkin_id,
+                ),
             )
             if updated_project is None:
                 raise ProjectProgressUpdateError("project_update_failed")
@@ -286,12 +331,25 @@ def _restore_superseded_project_summaries(
             continue
         previous = event.get("previous_status_summary")
         new = event.get("new_status_summary")
+        state_patch: dict[str, Any] = {}
         if previous is not None and str(project.get("status_summary") or "") == str(new or ""):
-            repo.update_project(
-                connection,
-                int(project["id"]),
-                status_summary=str(previous or ""),
-            )
+            state_patch["summary"] = str(previous or "")
+        repo.update_project(
+            connection,
+            int(project["id"]),
+            project_state=repo.merge_project_state(
+                project.get("project_state"),
+                state_patch,
+                updated_from={
+                    "source": "project_progress_restore",
+                    "source_type": event.get("source_type"),
+                    "source_id": event.get("source_id"),
+                },
+                replace_source_facts=True,
+                source_type=str(event.get("source_type") or ""),
+                source_id=event.get("source_id"),
+            ),
+        )
 
 
 def _progress_messages(context: dict[str, Any], soul: str) -> list[dict[str, str]]:
@@ -308,16 +366,19 @@ Trust the check-in content, but do not invent completed work not supported by ev
             "confidence",
             "progress_delta",
             "new_status_summary",
+            "project_state_patch",
             "evidence_text",
             "reason",
         ],
         "rules": [
-            "Choose exactly one project_id from projects.",
+            "Default to the daily_goal.project_id unless the check-in text clearly names another project.",
             "confidence is a number between 0 and 1 and is only for audit.",
             "new_status_summary may rewrite the old summary directly.",
+            "project_state_patch is the canonical state update; include summary and progress facts when possible.",
             "Use concise Chinese for progress_delta and new_status_summary.",
         ],
         "projects": context["projects"],
+        "daily_goal_project": context.get("daily_goal_project"),
         "daily_goal": context["daily_goal"],
         "active_version": context["active_version"],
         "checkin": context["checkin"],
@@ -347,6 +408,13 @@ def _normalize_progress_output(output: dict[str, Any]) -> dict[str, Any]:
     evidence_text = str(output.get("evidence_text") or "").strip()
     reason = str(output.get("reason") or "").strip()
     new_status_summary = str(output.get("new_status_summary") or "").strip()
+    project_state_patch = output.get("project_state_patch")
+    if not isinstance(project_state_patch, dict):
+        project_state_patch = {}
+    if new_status_summary and not str(project_state_patch.get("summary") or "").strip():
+        project_state_patch["summary"] = new_status_summary
+    facts = project_state_patch.get("facts")
+    project_state_patch["facts"] = facts if isinstance(facts, list) else []
     if not progress_delta:
         raise ValueError("missing_progress_delta")
     if not evidence_text:
@@ -356,6 +424,7 @@ def _normalize_progress_output(output: dict[str, Any]) -> dict[str, Any]:
         "confidence": confidence,
         "progress_delta": progress_delta,
         "new_status_summary": new_status_summary,
+        "project_state_patch": project_state_patch,
         "evidence_text": evidence_text,
         "reason": reason,
     }
