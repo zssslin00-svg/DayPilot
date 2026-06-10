@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DayPilot</title>
+    <link rel="stylesheet" href="/styles/main.css?v=20260610-action-bottom-align" />
+    <script type="module" src="/services/today-goal.js?v=20260610-action-bottom-align"></script>
+  </head>
+  <body>
+    <div class="paper-frame">
+      <aside class="sketch-sidebar" aria-label="DayPilot 导航">
+        <div class="brand-card" aria-label="DayPilot 首页">
+          <span class="brand-mark">DP</span>
+          <span>DayPilot</span>
+        </div>
+        <nav class="tabs" aria-label="关键模块">
+          <button id="tab-today" class="tab-button active" type="button" data-view="today-view">
+            <span class="nav-icon" aria-hidden="true">□</span>
+            <span>今日</span>
+          </button>
+          <button id="tab-history" class="tab-button" type="button" data-view="history-view">
+            <span class="nav-icon" aria-hidden="true">◇</span>
+            <span>历史</span>
+          </button>
+          <button id="tab-weekly" class="tab-button" type="button" data-view="weekly-view">
+            <span class="nav-icon" aria-hidden="true">⌁</span>
+            <span>周报</span>
+          </button>
+        </nav>
+        <button id="project-update-open" class="text-button secondary sidebar-action" type="button">
+          项目更新
+        </button>
+        <div class="sidebar-note">
+          <strong>日用节奏</strong>
+          <span>小目标，留下可检查成果。</span>
+        </div>
+      </aside>
+
+      <main class="app-shell">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">DayPilot</p>
+            <h1>日用工作台</h1>
+          </div>
+          <p class="topbar-note">四小时有效工作时间，别把长期愿望压成一天任务。</p>
+        </header>
+
+        <section class="alert" id="app-alert" hidden>
+          <strong>提示</strong>
+          <p id="app-alert-message"></p>
+          <button id="app-alert-close" class="icon-button" type="button" aria-label="关闭提示">×</button>
+        </section>
+
+        <section class="panel view-panel active" id="today-view" aria-labelledby="today-title">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Today</p>
+              <h2 id="today-title">今日目标</h2>
+            </div>
+            <button class="text-button secondary" id="today-refresh" type="button">刷新</button>
+          </div>
+
+          <article class="goal-card" id="goal-card">
+            <p class="muted" id="today-empty">正在读取今日目标。</p>
+            <div id="goal-content" hidden>
+              <h3 id="main-goal"></h3>
+              <div class="metric-row" aria-label="目标信息">
+                <span id="goal-date"></span>
+                <span id="estimated-minutes"></span>
+                <span id="difficulty-value"></span>
+                <span id="goal-type"></span>
+              </div>
+              <section>
+                <h4>完成标准</h4>
+                <ol id="completion-criteria"></ol>
+              </section>
+              <section>
+                <h4>最低成果</h4>
+                <p id="minimum-result"></p>
+              </section>
+            </div>
+          </article>
+
+          <div class="task-grid">
+            <form class="work-form" id="goal-feedback-form">
+              <h3>反馈修正</h3>
+              <label>
+                <span>修改意见</span>
+                <textarea id="goal-feedback-message" name="message" rows="3" required></textarea>
+              </label>
+              <button class="text-button" id="goal-feedback-submit" type="submit">生成新目标版本</button>
+            </form>
+
+            <form class="work-form" id="checkin-form">
+              <h3>Check-in</h3>
+              <label>
+                <span>完成情况</span>
+                <textarea id="completion-text" name="completion_text" rows="4" required></textarea>
+              </label>
+              <fieldset>
+                <legend>主观难度</legend>
+                <div class="segmented">
+                  <label><input type="radio" name="felt_difficulty" value="1" />1</label>
+                  <label><input type="radio" name="felt_difficulty" value="2" />2</label>
+                  <label><input type="radio" name="felt_difficulty" value="3" checked />3</label>
+                  <label><input type="radio" name="felt_difficulty" value="4" />4</label>
+                  <label><input type="radio" name="felt_difficulty" value="5" />5</label>
+                </div>
+              </fieldset>
+              <label>
+                <span>明天方向</span>
+                <textarea id="tomorrow-direction" name="tomorrow_direction" rows="3"></textarea>
+              </label>
+              <button class="text-button" id="checkin-submit" type="submit">保存 check-in</button>
+            </form>
+          </div>
+        </section>
+
+        <section class="panel view-panel" id="history-view" aria-labelledby="history-title" hidden>
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">History</p>
+              <h2 id="history-title">最近记录</h2>
+            </div>
+            <button class="text-button secondary" id="history-refresh" type="button">刷新</button>
+          </div>
+          <div class="history-list" id="history-list"></div>
+        </section>
+
+        <section class="panel view-panel" id="weekly-view" aria-labelledby="weekly-title" hidden>
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Weekly</p>
+              <h2 id="weekly-title">周报</h2>
+            </div>
+            <button class="text-button secondary" id="weekly-report-generate" type="button" disabled>
+              生成本周周报
+            </button>
+          </div>
+
+          <article class="weekly-report" id="weekly-report-card">
+            <p class="muted" id="weekly-empty">还没有周报。</p>
+            <div id="weekly-report-content" hidden>
+              <div class="weekly-meta">
+                <strong id="weekly-report-week"></strong>
+                <span id="weekly-report-updated"></span>
+              </div>
+              <section>
+                <h3>本周完成</h3>
+                <ul id="weekly-completed-work"></ul>
+              </section>
+              <section>
+                <h3>下周计划</h3>
+                <ul id="weekly-next-plan"></ul>
+              </section>
+              <section>
+                <h3>复盘</h3>
+                <ul id="weekly-reflection"></ul>
+              </section>
+            </div>
+          </article>
+
+          <form class="work-form inline-form" id="weekly-feedback-form">
+            <h3>周报修改意见</h3>
+            <label>
+              <span>修改意见</span>
+              <textarea id="weekly-feedback-message" name="message" rows="3" required></textarea>
+            </label>
+            <button class="text-button" id="weekly-feedback-submit" type="submit" disabled>
+              重生成周报
+            </button>
+          </form>
+
+          <section class="version-panel">
+            <h3>周报版本</h3>
+            <div class="version-list" id="weekly-report-versions"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <section class="project-modal" id="project-modal" hidden aria-labelledby="project-modal-title">
+      <div class="project-dialog">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Projects</p>
+            <h2 id="project-modal-title">项目更新</h2>
+          </div>
+          <button id="project-update-close" class="icon-button" type="button" aria-label="关闭项目更新">×</button>
+        </div>
+
+        <div class="project-columns">
+          <section>
+            <h3>当前项目</h3>
+            <div class="project-list" id="project-active-list"></div>
+          </section>
+          <section>
+            <h3>最近完成</h3>
+            <div class="project-list" id="project-completed-list"></div>
+          </section>
+        </div>
+
+        <form class="work-form project-form" id="project-lifecycle-form">
+          <label>
+            <span>自然语言更新</span>
+            <textarea
+              id="project-lifecycle-message"
+              name="message"
+              rows="5"
+              placeholder="例如：新增项目：微调一个编排规则的模型。当前进度：还没确定实现方案、数据集结构。目标：先确定方案和数据结构。"
+              required
+            ></textarea>
+          </label>
+          <p class="muted compact">也可以写：某个项目已经完成了，结果是……</p>
+          <button class="text-button" id="project-lifecycle-submit" type="submit">提交项目更新</button>
+        </form>
+
+        <p class="muted compact" id="project-lifecycle-result" aria-live="polite"></p>
+      </div>
+    </section>
+  </body>
+</html>

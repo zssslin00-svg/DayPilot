@@ -1,0 +1,10 @@
+[
+  {"id":"DIF-01","suite":"difficulty","completion_text":"完成了 95%，很顺。","felt_difficulty":1,"expected_direction":"increase"},
+  {"id":"DIF-02","suite":"difficulty","completion_text":"基本完成，但很吃力。","felt_difficulty":5,"expected_direction":"hold"},
+  {"id":"DIF-03","suite":"difficulty","completion_text":"只完成一小部分，卡住了。","felt_difficulty":5,"expected_direction":"decrease"},
+  {"id":"DIF-04","suite":"difficulty","completion_text":"只完成一小部分，但其实不难。","felt_difficulty":1,"expected_direction":"change_direction"},
+  {"id":"DIF-05","suite":"difficulty","completion_text":"完成一半，难度合适。","felt_difficulty":3,"expected_direction":"hold"},
+  {"id":"DIF-06","suite":"difficulty","completion_text":"完成了接口和测试。","felt_difficulty":2,"expected_direction":"hold"},
+  {"id":"DIF-07","suite":"difficulty","completion_text":"没完成，目标太大。","felt_difficulty":4,"expected_direction":"decrease"},
+  {"id":"DIF-08","suite":"difficulty","completion_text":"大部分完成，但后面需要收口。","felt_difficulty":4,"expected_direction":"hold"}
+]

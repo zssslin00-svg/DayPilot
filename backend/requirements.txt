@@ -1,0 +1,1 @@
+# DayPilot MVP backend uses only the Python standard library.

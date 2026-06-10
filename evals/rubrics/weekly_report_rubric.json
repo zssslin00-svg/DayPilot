@@ -1,0 +1,13 @@
+{
+  "suite": "weekly_report",
+  "pass_score": 80,
+  "dimensions": {
+    "three_sections": 10,
+    "completed_work_summary": 20,
+    "factuality": 20,
+    "next_week_outcomes": 15,
+    "reflection": 15,
+    "weekly_focus": 10,
+    "concise_language": 10
+  }
+}

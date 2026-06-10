@@ -1,0 +1,14 @@
+[
+  {"id":"FR-01","suite":"feedback_revision","title":"目标太大要缩小","input":{"message":"这个目标太大了，今天做不完。"},"expected":{"must":["scope_shrink","version_saved"],"must_not":["same_scope"]},"tags":["scope"]},
+  {"id":"FR-02","suite":"feedback_revision","title":"只有 40 分钟","input":{"message":"今天只有 40 分钟。"},"expected":{"must":["minutes_lte_45","criteria_reduced","version_saved"],"must_not":["over_time"]},"tags":["time"]},
+  {"id":"FR-03","suite":"feedback_revision","title":"更想写代码","input":{"message":"我今天更想写代码。"},"expected":{"must":["goal_type_coding","version_saved"],"must_not":["unrelated_direction"]},"tags":["preference"]},
+  {"id":"FR-04","suite":"feedback_revision","title":"完成标准不清楚","input":{"message":"完成标准不够清楚，我不知道怎么算做完。"},"expected":{"must":["clear_criteria","version_saved"],"must_not":["vague_criteria"]},"tags":["criteria"]},
+  {"id":"FR-05","suite":"feedback_revision","title":"目标太虚需要产出","input":{"message":"太虚了，要有实际产出。"},"expected":{"must":["deliverable_required","version_saved"],"must_not":["vague_goal"]},"tags":["deliverable"]},
+  {"id":"FR-06","suite":"feedback_revision","title":"临时开会只做最低版本","input":{"message":"今天临时开会，范围缩小，先只做最低版本。"},"expected":{"must":["scope_shrink","version_saved"],"must_not":["long_term_pollution"]},"tags":["day_constraint"]},
+  {"id":"FR-07","suite":"feedback_revision","title":"这几天多写代码","input":{"message":"这几天想多写代码，少写文档。"},"expected":{"must":["goal_type_coding","short_term_memory","version_saved"],"must_not":["memory_missing"]},"tags":["short_term_memory"]},
+  {"id":"FR-08","suite":"feedback_revision","title":"以后不要纯学习目标","input":{"message":"以后不要给我纯学习目标，要有交付物。"},"expected":{"must":["long_term_memory","deliverable_required","version_saved"],"must_not":["memory_missing"]},"tags":["long_term_memory"]},
+  {"id":"FR-09","suite":"feedback_revision","title":"和上周重点无关","input":{"message":"这和上周周报的下周重点没关系，目标太虚了。"},"expected":{"must":["deliverable_required","version_saved"],"must_not":["version_missing"]},"tags":["weekly_focus"]},
+  {"id":"FR-10","suite":"feedback_revision","title":"可以挑战一点但不多任务","input":{"message":"这个太简单了，可以挑战一点，但不要变成多个任务。"},"expected":{"must":["version_saved","single_goal"],"must_not":["multi_goal"]},"tags":["challenge"]},
+  {"id":"FR-11","suite":"feedback_revision","title":"不要换方向只缩小","input":{"message":"不要换方向，只把范围缩小。"},"expected":{"must":["scope_shrink","preserve_goal_type","version_saved"],"must_not":["direction_switch"]},"tags":["preserve_context"]},
+  {"id":"FR-12","suite":"feedback_revision","title":"连续反馈形成版本链","input":{"messages":["太大了。","今天只有 40 分钟。","完成标准再清楚点。"]},"expected":{"must":["three_versions","active_latest","clear_criteria"],"must_not":["version_chain_missing"]},"tags":["version_chain"]}
+]

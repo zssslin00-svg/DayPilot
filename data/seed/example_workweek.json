@@ -1,0 +1,802 @@
+{
+  "user_profile": {
+    "id": 1,
+    "display_name": "DayPilot User",
+    "long_term_direction": "Build a reliable personal weekday goal and review loop for agent-assisted work.",
+    "current_focus_projects": [
+      "DayPilot MVP",
+      "SQLite persistence layer"
+    ],
+    "goal_preferences": {
+      "goal_type_weights": {
+        "implementation": 0.5,
+        "design": 0.25,
+        "review": 0.15,
+        "docs": 0.1
+      }
+    },
+    "avoid_patterns": [
+      "vague learning goals",
+      "multiple main goals in one day",
+      "goals without a concrete artifact"
+    ],
+    "default_available_minutes": 90,
+    "timezone": "Asia/Shanghai",
+    "workday_rule": {
+      "days": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "created_at": "2026-06-08 09:00:00",
+    "updated_at": "2026-06-08 09:00:00"
+  },
+  "daily_goals": [
+    {
+      "id": 1001,
+      "profile_id": 1,
+      "goal_date": "2026-06-08",
+      "week_id": "2026-W24",
+      "weekday": 1,
+      "is_workday": 1,
+      "status": "active",
+      "active_version_id": 5002,
+      "context_snapshot": {
+        "ability_state_id": 3000,
+        "weekly_focus_ids": [],
+        "recent_days": 0
+      },
+      "revision_count": 1,
+      "generated_at": "2026-06-08 09:05:00",
+      "created_at": "2026-06-08 09:05:00",
+      "updated_at": "2026-06-08 10:15:00"
+    },
+    {
+      "id": 1002,
+      "profile_id": 1,
+      "goal_date": "2026-06-09",
+      "week_id": "2026-W24",
+      "weekday": 2,
+      "is_workday": 1,
+      "status": "active",
+      "active_version_id": 5011,
+      "context_snapshot": {
+        "ability_state_id": 3001,
+        "recent_checkin_ids": [
+          9001
+        ]
+      },
+      "revision_count": 0,
+      "generated_at": "2026-06-09 09:04:00",
+      "created_at": "2026-06-09 09:04:00",
+      "updated_at": "2026-06-09 09:04:00"
+    },
+    {
+      "id": 1003,
+      "profile_id": 1,
+      "goal_date": "2026-06-10",
+      "week_id": "2026-W24",
+      "weekday": 3,
+      "is_workday": 1,
+      "status": "active",
+      "active_version_id": 5021,
+      "context_snapshot": {
+        "ability_state_id": 3002,
+        "recent_checkin_ids": [
+          9001,
+          9002
+        ]
+      },
+      "revision_count": 0,
+      "generated_at": "2026-06-10 09:03:00",
+      "created_at": "2026-06-10 09:03:00",
+      "updated_at": "2026-06-10 09:03:00"
+    },
+    {
+      "id": 1004,
+      "profile_id": 1,
+      "goal_date": "2026-06-11",
+      "week_id": "2026-W24",
+      "weekday": 4,
+      "is_workday": 1,
+      "status": "active",
+      "active_version_id": 5031,
+      "context_snapshot": {
+        "ability_state_id": 3003,
+        "recent_checkin_ids": [
+          9001,
+          9002,
+          9003
+        ]
+      },
+      "revision_count": 0,
+      "generated_at": "2026-06-11 09:02:00",
+      "created_at": "2026-06-11 09:02:00",
+      "updated_at": "2026-06-11 09:02:00"
+    },
+    {
+      "id": 1005,
+      "profile_id": 1,
+      "goal_date": "2026-06-12",
+      "week_id": "2026-W24",
+      "weekday": 5,
+      "is_workday": 1,
+      "status": "active",
+      "active_version_id": 5041,
+      "context_snapshot": {
+        "ability_state_id": 3004,
+        "recent_checkin_ids": [
+          9001,
+          9002,
+          9003,
+          9004
+        ]
+      },
+      "revision_count": 0,
+      "generated_at": "2026-06-12 09:05:00",
+      "created_at": "2026-06-12 09:05:00",
+      "updated_at": "2026-06-12 09:05:00"
+    }
+  ],
+  "goal_versions": [
+    {
+      "id": 5001,
+      "daily_goal_id": 1001,
+      "version_no": 1,
+      "is_active": 1,
+      "main_goal": "Design the complete DayPilot database and write all acceptance notes.",
+      "goal_reason": "The database model is the foundation for goal versions, feedback, and weekly reports.",
+      "success_criteria": [
+        "List all core tables",
+        "Describe keys and relationships",
+        "Draft the initialization checklist"
+      ],
+      "estimated_minutes": 120,
+      "difficulty_level": 4,
+      "minimum_version": "Complete field lists for all core tables.",
+      "stretch_challenge": "Add DDL and sample data.",
+      "avoid_today": "Do not expand into login, multi-user support, or integrations.",
+      "goal_type": "design",
+      "revision_source": "initial_generation",
+      "revision_reason": "Morning goal creation.",
+      "critic_result": {
+        "pass": true,
+        "issues": []
+      },
+      "prompt_version": "goal_generation_v1",
+      "created_at": "2026-06-08 09:05:00"
+    },
+    {
+      "id": 5002,
+      "daily_goal_id": 1001,
+      "version_no": 2,
+      "is_active": 1,
+      "main_goal": "Finish the SQLite core table schema and a short initialization checklist.",
+      "goal_reason": "The available time is shorter than expected, so the useful deliverable is a narrower database slice.",
+      "success_criteria": [
+        "Create the eight core tables",
+        "Include primary keys, foreign keys, and indexes",
+        "Write a seed-data checklist"
+      ],
+      "estimated_minutes": 75,
+      "difficulty_level": 3,
+      "minimum_version": "DDL for the eight core tables exists.",
+      "stretch_challenge": "Add one-week sample records.",
+      "avoid_today": "Do not implement API routes or frontend pages.",
+      "goal_type": "implementation",
+      "revision_source": "user_feedback",
+      "revision_reason": "User only has 75 minutes today and asked to reduce scope.",
+      "feedback_message_id": 7001,
+      "critic_result": {
+        "pass": true,
+        "issues": []
+      },
+      "prompt_version": "goal_revision_v1",
+      "created_at": "2026-06-08 10:15:00"
+    },
+    {
+      "id": 5011,
+      "daily_goal_id": 1002,
+      "version_no": 1,
+      "is_active": 1,
+      "main_goal": "Implement the SQLite initialization script and connection helper.",
+      "goal_reason": "A repeatable local database setup is needed before repository functions can be tested.",
+      "success_criteria": [
+        "Schema can be applied to an empty database",
+        "Foreign keys are enabled on connections",
+        "The script reports table creation"
+      ],
+      "estimated_minutes": 90,
+      "difficulty_level": 3,
+      "minimum_version": "A local SQLite file can be initialized.",
+      "stretch_challenge": "Make the script path configurable.",
+      "avoid_today": "Do not add a web API for database operations.",
+      "goal_type": "implementation",
+      "revision_source": "initial_generation",
+      "revision_reason": "Morning goal creation.",
+      "critic_result": {
+        "pass": true,
+        "issues": []
+      },
+      "prompt_version": "goal_generation_v1",
+      "created_at": "2026-06-09 09:04:00"
+    },
+    {
+      "id": 5021,
+      "daily_goal_id": 1003,
+      "version_no": 1,
+      "is_active": 1,
+      "main_goal": "Create repository functions for user profiles, daily goals, goal versions, and check-ins.",
+      "goal_reason": "These records form the daily loop and should be simple to insert and fetch from services.",
+      "success_criteria": [
+        "Create and read user_profile",
+        "Create and read daily_goals",
+        "Create and read goal_versions",
+        "Create and read daily_checkins"
+      ],
+      "estimated_minutes": 95,
+      "difficulty_level": 3,
+      "minimum_version": "The four daily-loop tables have create/read helpers.",
+      "stretch_challenge": "Add date and week query helpers.",
+      "avoid_today": "Do not implement goal generation logic.",
+      "goal_type": "implementation",
+      "revision_source": "initial_generation",
+      "revision_reason": "Morning goal creation.",
+      "critic_result": {
+        "pass": true,
+        "issues": []
+      },
+      "prompt_version": "goal_generation_v1",
+      "created_at": "2026-06-10 09:03:00"
+    },
+    {
+      "id": 5031,
+      "daily_goal_id": 1004,
+      "version_no": 1,
+      "is_active": 1,
+      "main_goal": "Create repository functions for feedback, ability state, weekly reports, and weekly focus.",
+      "goal_reason": "The feedback and weekly review loop need the same basic persistence surface as daily goals.",
+      "success_criteria": [
+        "Create and read feedback messages",
+        "Create, update, and read ability_state",
+        "Create and read weekly_reports",
+        "Create and read weekly_focus"
+      ],
+      "estimated_minutes": 90,
+      "difficulty_level": 3,
+      "minimum_version": "All four tables have basic repository helpers.",
+      "stretch_challenge": "Preserve current ability state as a single active row.",
+      "avoid_today": "Do not add LLM interpretation.",
+      "goal_type": "implementation",
+      "revision_source": "initial_generation",
+      "revision_reason": "Morning goal creation.",
+      "critic_result": {
+        "pass": true,
+        "issues": []
+      },
+      "prompt_version": "goal_generation_v1",
+      "created_at": "2026-06-11 09:02:00"
+    },
+    {
+      "id": 5041,
+      "daily_goal_id": 1005,
+      "version_no": 1,
+      "is_active": 1,
+      "main_goal": "Seed a complete workweek and verify date and week retrieval paths.",
+      "goal_reason": "The database layer is only useful if it can prove the Friday aggregation path works.",
+      "success_criteria": [
+        "Seed Monday through Friday goals",
+        "Seed check-ins and at least one feedback message",
+        "Read one date's goal and feedback",
+        "Read the full 2026-W24 workweek"
+      ],
+      "estimated_minutes": 85,
+      "difficulty_level": 3,
+      "minimum_version": "A fixed seed file and test script pass locally.",
+      "stretch_challenge": "Include weekly_report and weekly_focus seed records.",
+      "avoid_today": "Do not build frontend screens.",
+      "goal_type": "implementation",
+      "revision_source": "initial_generation",
+      "revision_reason": "Morning goal creation.",
+      "critic_result": {
+        "pass": true,
+        "issues": []
+      },
+      "prompt_version": "goal_generation_v1",
+      "created_at": "2026-06-12 09:05:00"
+    }
+  ],
+  "feedback_messages": [
+    {
+      "id": 7001,
+      "daily_goal_id": 1001,
+      "before_version_id": 5001,
+      "after_version_id": 5002,
+      "raw_message": "I only have 75 minutes today. Please reduce the goal to the database schema only.",
+      "feedback_type": "day_constraint",
+      "affected_scope": "today",
+      "interpretation_json": {
+        "summary": "User has less time and wants a smaller goal.",
+        "confidence": 0.92
+      },
+      "extracted_constraints": {
+        "available_minutes": 75,
+        "reduce_scope": true
+      },
+      "extracted_preferences": {},
+      "memory_action": "none",
+      "should_regenerate_goal": 1,
+      "is_resolved": 1,
+      "created_at": "2026-06-08 10:12:00"
+    }
+  ],
+  "daily_checkins": [
+    {
+      "id": 9001,
+      "daily_goal_id": 1001,
+      "checkin_date": "2026-06-08",
+      "week_id": "2026-W24",
+      "is_workday": 1,
+      "completion_text": "Finished the core schema draft and table relationships. Index details still need review.",
+      "felt_difficulty": 3,
+      "tomorrow_direction": null,
+      "parsed_completion_rate": 0.8,
+      "completed_items": [
+        "Core schema draft",
+        "Relationship review"
+      ],
+      "unfinished_items": [
+        "Index verification"
+      ],
+      "blockers": [],
+      "actual_outputs": [
+        "scripts/init_db.sql draft"
+      ],
+      "processor_snapshot": {
+        "confidence": 0.86,
+        "needs_follow_up": false
+      },
+      "created_at": "2026-06-08 18:10:00",
+      "updated_at": "2026-06-08 18:10:00"
+    },
+    {
+      "id": 9002,
+      "daily_goal_id": 1002,
+      "checkin_date": "2026-06-09",
+      "week_id": "2026-W24",
+      "is_workday": 1,
+      "completion_text": "Initialization script works against a fresh SQLite file and keeps foreign keys enabled.",
+      "felt_difficulty": 3,
+      "tomorrow_direction": "Start the repository helpers.",
+      "parsed_completion_rate": 1.0,
+      "completed_items": [
+        "Schema initialization",
+        "Connection helper"
+      ],
+      "unfinished_items": [],
+      "blockers": [],
+      "actual_outputs": [
+        "backend/repositories/database.py",
+        "scripts/init_db.py"
+      ],
+      "processor_snapshot": {
+        "confidence": 0.9,
+        "needs_follow_up": false
+      },
+      "created_at": "2026-06-09 18:05:00",
+      "updated_at": "2026-06-09 18:05:00"
+    },
+    {
+      "id": 9003,
+      "daily_goal_id": 1003,
+      "checkin_date": "2026-06-10",
+      "week_id": "2026-W24",
+      "is_workday": 1,
+      "completion_text": "Added the daily-loop repository functions and basic date queries.",
+      "felt_difficulty": 3,
+      "tomorrow_direction": "Finish feedback and weekly report repository helpers.",
+      "parsed_completion_rate": 0.9,
+      "completed_items": [
+        "User profile helpers",
+        "Daily goal helpers",
+        "Goal version helpers",
+        "Check-in helpers"
+      ],
+      "unfinished_items": [
+        "Ability state update helper"
+      ],
+      "blockers": [],
+      "actual_outputs": [
+        "backend/repositories/daypilot_repository.py"
+      ],
+      "processor_snapshot": {
+        "confidence": 0.88,
+        "needs_follow_up": false
+      },
+      "created_at": "2026-06-10 18:20:00",
+      "updated_at": "2026-06-10 18:20:00"
+    },
+    {
+      "id": 9004,
+      "daily_goal_id": 1004,
+      "checkin_date": "2026-06-11",
+      "week_id": "2026-W24",
+      "is_workday": 1,
+      "completion_text": "Finished feedback, ability, report, and focus helpers. Current ability state switching works.",
+      "felt_difficulty": 3,
+      "tomorrow_direction": "Create seed data and tests.",
+      "parsed_completion_rate": 1.0,
+      "completed_items": [
+        "Feedback helpers",
+        "Ability helpers",
+        "Weekly report helpers",
+        "Weekly focus helpers"
+      ],
+      "unfinished_items": [],
+      "blockers": [],
+      "actual_outputs": [
+        "Repository helpers"
+      ],
+      "processor_snapshot": {
+        "confidence": 0.91,
+        "needs_follow_up": false
+      },
+      "created_at": "2026-06-11 18:15:00",
+      "updated_at": "2026-06-11 18:15:00"
+    },
+    {
+      "id": 9005,
+      "daily_goal_id": 1005,
+      "checkin_date": "2026-06-12",
+      "week_id": "2026-W24",
+      "is_workday": 1,
+      "completion_text": "Seed data covers the full week and tests verify inserts and retrieval helpers.",
+      "felt_difficulty": 3,
+      "tomorrow_direction": "Use the database layer from API services next week.",
+      "parsed_completion_rate": 1.0,
+      "completed_items": [
+        "One-week seed data",
+        "Database tests",
+        "Week retrieval query"
+      ],
+      "unfinished_items": [],
+      "blockers": [],
+      "actual_outputs": [
+        "data/seed/example_workweek.json",
+        "backend/tests/test_database.py"
+      ],
+      "processor_snapshot": {
+        "confidence": 0.93,
+        "needs_follow_up": false
+      },
+      "created_at": "2026-06-12 18:05:00",
+      "updated_at": "2026-06-12 18:05:00"
+    }
+  ],
+  "ability_states": [
+    {
+      "id": 3000,
+      "state_date": "2026-06-08",
+      "source_checkin_id": null,
+      "source_feedback_message_id": null,
+      "current_difficulty": 3.0,
+      "target_difficulty_level": 3,
+      "recent_completion_rate": null,
+      "recent_felt_difficulty_avg": null,
+      "completion_streak": 0,
+      "low_completion_streak": 0,
+      "overload_count": 0,
+      "underload_count": 0,
+      "default_estimated_minutes": 90,
+      "preferred_goal_type_weights": {
+        "implementation": 0.5,
+        "design": 0.25,
+        "review": 0.15,
+        "docs": 0.1
+      },
+      "short_term_preferences": {},
+      "long_term_preferences_snapshot": {
+        "avoid_vague_learning_goal": true
+      },
+      "avoid_patterns_snapshot": [
+        "vague learning goals",
+        "goals without a concrete artifact"
+      ],
+      "adjustment_direction": "initial",
+      "update_reason": "Initial DayPilot ability state before the sample workweek.",
+      "is_current": 0,
+      "created_at": "2026-06-08 09:00:00"
+    },
+    {
+      "id": 3001,
+      "state_date": "2026-06-08",
+      "source_checkin_id": 9001,
+      "source_feedback_message_id": 7001,
+      "current_difficulty": 3.0,
+      "target_difficulty_level": 3,
+      "recent_completion_rate": 0.8,
+      "recent_felt_difficulty_avg": 3.0,
+      "completion_streak": 1,
+      "low_completion_streak": 0,
+      "overload_count": 0,
+      "underload_count": 0,
+      "default_estimated_minutes": 90,
+      "preferred_goal_type_weights": {
+        "implementation": 0.5,
+        "design": 0.25,
+        "review": 0.15,
+        "docs": 0.1
+      },
+      "short_term_preferences": {
+        "valid_until": "2026-06-12",
+        "prefer": [
+          "database",
+          "backend"
+        ]
+      },
+      "long_term_preferences_snapshot": {
+        "avoid_vague_learning_goal": true
+      },
+      "avoid_patterns_snapshot": [
+        "vague learning goals",
+        "goals without a concrete artifact"
+      ],
+      "adjustment_direction": "hold",
+      "update_reason": "Completion was good and felt difficulty was moderate.",
+      "is_current": 0,
+      "created_at": "2026-06-08 18:12:00"
+    },
+    {
+      "id": 3002,
+      "state_date": "2026-06-09",
+      "source_checkin_id": 9002,
+      "source_feedback_message_id": null,
+      "current_difficulty": 3.1,
+      "target_difficulty_level": 3,
+      "recent_completion_rate": 0.9,
+      "recent_felt_difficulty_avg": 3.0,
+      "completion_streak": 2,
+      "low_completion_streak": 0,
+      "overload_count": 0,
+      "underload_count": 0,
+      "default_estimated_minutes": 90,
+      "preferred_goal_type_weights": {
+        "implementation": 0.55,
+        "design": 0.2,
+        "review": 0.15,
+        "docs": 0.1
+      },
+      "short_term_preferences": {
+        "valid_until": "2026-06-12",
+        "prefer": [
+          "repository helpers",
+          "tests"
+        ]
+      },
+      "long_term_preferences_snapshot": {
+        "avoid_vague_learning_goal": true
+      },
+      "avoid_patterns_snapshot": [
+        "vague learning goals",
+        "goals without a concrete artifact"
+      ],
+      "adjustment_direction": "hold",
+      "update_reason": "One complete day is not enough to increase target difficulty.",
+      "is_current": 0,
+      "created_at": "2026-06-09 18:07:00"
+    },
+    {
+      "id": 3003,
+      "state_date": "2026-06-10",
+      "source_checkin_id": 9003,
+      "source_feedback_message_id": null,
+      "current_difficulty": 3.1,
+      "target_difficulty_level": 3,
+      "recent_completion_rate": 0.9,
+      "recent_felt_difficulty_avg": 3.0,
+      "completion_streak": 3,
+      "low_completion_streak": 0,
+      "overload_count": 0,
+      "underload_count": 0,
+      "default_estimated_minutes": 90,
+      "preferred_goal_type_weights": {
+        "implementation": 0.55,
+        "design": 0.2,
+        "review": 0.15,
+        "docs": 0.1
+      },
+      "short_term_preferences": {
+        "valid_until": "2026-06-12",
+        "prefer": [
+          "feedback persistence",
+          "weekly aggregation"
+        ]
+      },
+      "long_term_preferences_snapshot": {
+        "avoid_vague_learning_goal": true
+      },
+      "avoid_patterns_snapshot": [
+        "vague learning goals",
+        "goals without a concrete artifact"
+      ],
+      "adjustment_direction": "hold",
+      "update_reason": "Keep difficulty stable while finishing persistence coverage.",
+      "is_current": 0,
+      "created_at": "2026-06-10 18:22:00"
+    },
+    {
+      "id": 3004,
+      "state_date": "2026-06-11",
+      "source_checkin_id": 9004,
+      "source_feedback_message_id": null,
+      "current_difficulty": 3.2,
+      "target_difficulty_level": 3,
+      "recent_completion_rate": 0.93,
+      "recent_felt_difficulty_avg": 3.0,
+      "completion_streak": 4,
+      "low_completion_streak": 0,
+      "overload_count": 0,
+      "underload_count": 0,
+      "default_estimated_minutes": 90,
+      "preferred_goal_type_weights": {
+        "implementation": 0.55,
+        "design": 0.15,
+        "review": 0.15,
+        "docs": 0.15
+      },
+      "short_term_preferences": {
+        "valid_until": "2026-06-15",
+        "prefer": [
+          "seed data",
+          "verification"
+        ]
+      },
+      "long_term_preferences_snapshot": {
+        "avoid_vague_learning_goal": true
+      },
+      "avoid_patterns_snapshot": [
+        "vague learning goals",
+        "goals without a concrete artifact"
+      ],
+      "adjustment_direction": "hold",
+      "update_reason": "Stable completion supports another implementation-focused day.",
+      "is_current": 0,
+      "created_at": "2026-06-11 18:17:00"
+    },
+    {
+      "id": 3005,
+      "state_date": "2026-06-12",
+      "source_checkin_id": 9005,
+      "source_feedback_message_id": null,
+      "current_difficulty": 3.3,
+      "target_difficulty_level": 3,
+      "recent_completion_rate": 0.94,
+      "recent_felt_difficulty_avg": 3.0,
+      "completion_streak": 5,
+      "low_completion_streak": 0,
+      "overload_count": 0,
+      "underload_count": 0,
+      "default_estimated_minutes": 90,
+      "preferred_goal_type_weights": {
+        "implementation": 0.55,
+        "design": 0.15,
+        "review": 0.15,
+        "docs": 0.15
+      },
+      "short_term_preferences": {
+        "valid_until": "2026-06-19",
+        "prefer": [
+          "API integration",
+          "end-to-end flow"
+        ]
+      },
+      "long_term_preferences_snapshot": {
+        "avoid_vague_learning_goal": true
+      },
+      "avoid_patterns_snapshot": [
+        "vague learning goals",
+        "goals without a concrete artifact"
+      ],
+      "adjustment_direction": "hold",
+      "update_reason": "The full sample week completed well; keep difficulty steady for API integration.",
+      "is_current": 1,
+      "created_at": "2026-06-12 18:08:00"
+    }
+  ],
+  "weekly_reports": [
+    {
+      "id": 6001,
+      "week_id": "2026-W24",
+      "week_start_date": "2026-06-08",
+      "week_end_date": "2026-06-12",
+      "generated_on_date": "2026-06-12",
+      "status": "final",
+      "completed_work": "- Designed and implemented the DayPilot SQLite schema.\n- Added repository helpers for the daily loop, feedback loop, ability state, weekly reports, and weekly focus.\n- Seeded one full workweek and verified date/week retrieval.",
+      "next_week_plan": "- Connect repository helpers to the backend API surface.\n- Add service-level workflows for daily goal loading and check-in submission.",
+      "weekly_reflection": "- The work stayed useful by keeping persistence simple and testable before adding agent behavior.",
+      "report_text": "Completed work\n- Designed and implemented the DayPilot SQLite schema.\n- Added repository helpers for the daily loop, feedback loop, ability state, weekly reports, and weekly focus.\n- Seeded one full workweek and verified date/week retrieval.\n\nNext week plan\n- Connect repository helpers to the backend API surface.\n- Add service-level workflows for daily goal loading and check-in submission.\n\nWeekly reflection\n- The work stayed useful by keeping persistence simple and testable before adding agent behavior.",
+      "source_snapshot": {
+        "daily_goal_ids": [
+          1001,
+          1002,
+          1003,
+          1004,
+          1005
+        ],
+        "active_version_ids": [
+          5002,
+          5011,
+          5021,
+          5031,
+          5041
+        ],
+        "checkin_ids": [
+          9001,
+          9002,
+          9003,
+          9004,
+          9005
+        ],
+        "feedback_message_ids": [
+          7001
+        ],
+        "ability_state_id": 3005
+      },
+      "next_week_focus_summary": "Connect persistence to API services and complete daily workflow endpoints.",
+      "quality_score": 4,
+      "prompt_version": "weekly_report_v1",
+      "model_name": null,
+      "created_at": "2026-06-12 18:30:00",
+      "updated_at": "2026-06-12 18:30:00"
+    }
+  ],
+  "weekly_focus": [
+    {
+      "id": 8001,
+      "weekly_report_id": 6001,
+      "source_week_id": "2026-W24",
+      "target_week_id": "2026-W25",
+      "focus_order": 1,
+      "focus_text": "Connect repository helpers to backend API endpoints.",
+      "desired_outcome": "The backend can return today's active goal and accept a check-in through service code.",
+      "focus_type": "implementation",
+      "priority": 5,
+      "status": "active",
+      "context_payload": {
+        "suggested_goal_type": "implementation",
+        "must_include": [
+          "daily goal read path",
+          "check-in write path"
+        ]
+      },
+      "carried_into_goal_id": null,
+      "created_at": "2026-06-12 18:31:00",
+      "updated_at": "2026-06-12 18:31:00"
+    },
+    {
+      "id": 8002,
+      "weekly_report_id": 6001,
+      "source_week_id": "2026-W24",
+      "target_week_id": "2026-W25",
+      "focus_order": 2,
+      "focus_text": "Add service-level workflow tests around persistence.",
+      "desired_outcome": "A daily loop test can prove goal loading, feedback capture, check-in, and weekly aggregation.",
+      "focus_type": "review",
+      "priority": 4,
+      "status": "active",
+      "context_payload": {
+        "suggested_goal_type": "review",
+        "must_include": [
+          "service tests",
+          "repository integration"
+        ]
+      },
+      "carried_into_goal_id": null,
+      "created_at": "2026-06-12 18:32:00",
+      "updated_at": "2026-06-12 18:32:00"
+    }
+  ]
+}

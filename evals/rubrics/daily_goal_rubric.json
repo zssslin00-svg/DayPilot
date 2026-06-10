@@ -1,0 +1,14 @@
+{
+  "suite": "daily_goal",
+  "pass_score": 80,
+  "dimensions": {
+    "single_goal": 10,
+    "deliverable": 15,
+    "criteria": 20,
+    "time_fit": 15,
+    "direction_alignment": 15,
+    "minimum_and_stretch": 10,
+    "actionable": 10,
+    "boundaries": 5
+  }
+}

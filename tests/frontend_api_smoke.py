@@ -1,0 +1,342 @@
+from __future__ import annotations
+
+import json
+import os
+import socket
+import sys
+import tempfile
+import threading
+import urllib.error
+import urllib.request
+from datetime import date
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+os.environ["DAYPILOT_LLM_MODE"] = "mock"
+
+from backend.api.server import create_server  # noqa: E402
+from backend.repositories import daypilot_repository as repo  # noqa: E402
+from backend.repositories.database import initialize_database  # noqa: E402
+
+
+FRIDAY = date(2026, 6, 12)
+WEEK_ID = "2026-W24"
+
+
+class QuietStaticHandler(SimpleHTTPRequestHandler):
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _start_static_frontend() -> tuple[ThreadingHTTPServer, threading.Thread, str]:
+    port = _free_port()
+    handler = partial(QuietStaticHandler, directory=str(ROOT / "frontend"))
+    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread, f"http://127.0.0.1:{port}"
+
+
+def _start_backend(db_path: Path, soul_path: Path) -> tuple[Any, threading.Thread, str]:
+    port = _free_port()
+    server = create_server(
+        "127.0.0.1",
+        port,
+        today_provider=lambda: FRIDAY,
+        db_path=db_path,
+        soul_path=soul_path,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread, f"http://127.0.0.1:{port}"
+
+
+def _get_json(url: str) -> tuple[int, dict[str, Any]]:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(url, timeout=5) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+        return int(response.status), payload
+
+
+def _post_json(url: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    request_body = body
+    if "/api/checkin" in url:
+        request_body = {"completion_status": "completed", **body}
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(request, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            return int(response.status), payload
+    except urllib.error.HTTPError as response:
+        payload = json.loads(response.read().decode("utf-8"))
+        return int(response.status), payload
+
+
+def _read_text(url: str) -> str:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(url, timeout=5) as response:
+        return response.read().decode("utf-8")
+
+
+def _stop_server(server: Any, thread: threading.Thread) -> None:
+    server.shutdown()
+    server.server_close()
+    thread.join(timeout=5)
+
+
+def _soul_file(root: Path) -> Path:
+    path = root / "SOUL.md"
+    path.write_text(
+        "# DayPilot SOUL\n\n## 当前项目\n\n旧项目段落\n\n## 用户偏好\n\n- 小目标。\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _seed_monday_to_thursday(db_path: Path) -> None:
+    connection = initialize_database(db_path)
+    try:
+        with connection:
+            repo.create_user_profile(
+                connection,
+                id=1,
+                long_term_direction="Build a useful DayPilot MVP.",
+                current_focus_projects=["DayPilot smoke acceptance"],
+                default_available_minutes=80,
+            )
+            for day_text, item in [
+                ("2026-06-08", "today goal API"),
+                ("2026-06-09", "check-in persistence"),
+                ("2026-06-10", "goal feedback revision"),
+                ("2026-06-11", "weekly report aggregation"),
+            ]:
+                daily_goal_id = repo.create_daily_goal(
+                    connection,
+                    goal_date=day_text,
+                    context_snapshot={"source": "frontend-api-smoke"},
+                    generated_at=f"{day_text} 09:00:00",
+                )
+                repo.create_goal_version(
+                    connection,
+                    daily_goal_id=daily_goal_id,
+                    version_no=1,
+                    is_active=1,
+                    main_goal=f"完成 DayPilot {item} 的可验收切片",
+                    goal_reason=f"{item} 支撑 MVP smoke 验收。",
+                    success_criteria=[f"交付 {item}", "记录验收结果"],
+                    estimated_minutes=70,
+                    difficulty_level=3,
+                    minimum_version=f"{item} 有可检查记录。",
+                    stretch_challenge="补充一条回归测试。",
+                    goal_type="coding",
+                    revision_source="initial_generation",
+                )
+                repo.create_daily_checkin(
+                    connection,
+                    daily_goal_id=daily_goal_id,
+                    checkin_date=day_text,
+                    week_id=WEEK_ID,
+                    completion_text=f"完成 {item}，留下可复查记录。",
+                    felt_difficulty=3,
+                    tomorrow_direction="继续 DayPilot smoke 验收",
+                    parsed_completion_rate=0.9,
+                    completed_items=[item],
+                    unfinished_items=[],
+                    blockers=[],
+                    actual_outputs=[f"smoke/{item}"],
+                    processor_snapshot={"source": "frontend-api-smoke"},
+                )
+            repo.create_ability_state(
+                connection,
+                state_date="2026-06-11",
+                current_difficulty=3.0,
+                target_difficulty_level=3,
+                recent_completion_rate=0.9,
+                recent_felt_difficulty_avg=3.0,
+                default_estimated_minutes=80,
+                preferred_goal_type_weights={"coding": 0.7, "testing": 0.3},
+                short_term_preferences={},
+                long_term_preferences_snapshot={},
+                avoid_patterns_snapshot=["目标太大", "周报流水账"],
+                adjustment_direction="hold",
+                update_reason="Smoke seed.",
+                is_current=1,
+            )
+    finally:
+        connection.close()
+
+
+def main() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = Path(temp_dir) / "frontend-api-smoke.sqlite3"
+        soul_path = _soul_file(Path(temp_dir))
+        _seed_monday_to_thursday(db_path)
+
+        frontend_server, frontend_thread, frontend_base = _start_static_frontend()
+        backend_server, backend_thread, backend_base = _start_backend(db_path, soul_path)
+        try:
+            homepage = _read_text(f"{frontend_base}/pages/index.html")
+            for marker in [
+                'id="today-view"',
+                'id="history-view"',
+                'id="weekly-view"',
+                'id="history-list"',
+                'id="weekly-feedback-form"',
+                'id="weekly-report-versions"',
+                'id="app-alert"',
+                'id="project-update-open"',
+                'id="project-modal"',
+                'id="project-active-list"',
+                'id="project-lifecycle-form"',
+                'id="goal-card"',
+                'id="checkin-form"',
+                'id="goal-feedback-form"',
+                'id="weekly-report-generate"',
+                'id="weekly-completed-work"',
+                'id="weekly-next-plan"',
+                'id="weekly-reflection"',
+            ]:
+                assert marker in homepage, f"homepage missing {marker}"
+            assert "model_name" not in homepage
+            assert "llm_metadata" not in homepage
+
+            status, project_create = _post_json(
+                f"{backend_base}/api/projects/lifecycle",
+                {
+                    "message": "新增 P0 项目：微调一个编排规则的模型。当前进度：还没确定实现方案。目标：先确定方案。",
+                },
+            )
+            assert status == 200
+            assert project_create["status"] == "applied"
+            assert project_create["action"] == "create_project"
+
+            status, projects_payload = _get_json(f"{backend_base}/api/projects")
+            assert status == 200
+            assert any(project["name"] == "微调一个编排规则的模型" for project in projects_payload["active_projects"])
+
+            status, today_payload = _get_json(f"{backend_base}/api/today-goal")
+            assert status == 200
+            assert today_payload["is_workday"] is True
+            assert today_payload["active_project_count"] == len(projects_payload["active_projects"])
+            assert len(today_payload["goals"]) == len(projects_payload["active_projects"])
+            assert all(goal["daily_goal"]["goal_date"] == FRIDAY.isoformat() for goal in today_payload["goals"])
+            goal_id = today_payload["goals"][0]["daily_goal"]["id"]
+
+            status, feedback_payload = _post_json(
+                f"{backend_base}/api/goal-feedback",
+                {
+                    "date": FRIDAY.isoformat(),
+                    "goal_id": goal_id,
+                    "message": "今天只有 40 分钟，请缩小范围并写清完成标准。",
+                },
+            )
+            assert status == 200
+            assert feedback_payload["updated_goal"]["active_version"]["version_no"] == 2
+            assert feedback_payload["updated_goal"]["goal_output"]["estimated_minutes"] <= 40
+            assert feedback_payload["memory_update"]["status"] in {"applied", "skipped", "failed"}
+
+            status, checkin_payload = _post_json(
+                f"{backend_base}/api/checkin",
+                {
+                    "date": FRIDAY.isoformat(),
+                    "goal_id": goal_id,
+                    "completion_text": "完成 smoke 验收目标，三段式周报可以生成。",
+                    "felt_difficulty": 3,
+                    "tomorrow_direction": "下周继续 weekly_focus 承接验证",
+                },
+            )
+            assert status == 200
+            for index, goal_record in enumerate(today_payload["goals"][1:], start=2):
+                status, checkin_payload = _post_json(
+                    f"{backend_base}/api/checkin",
+                    {
+                        "date": FRIDAY.isoformat(),
+                        "goal_id": goal_record["daily_goal"]["id"],
+                        "completion_text": f"完成 smoke 验收目标 {index}，三段式周报可以生成。",
+                        "felt_difficulty": 3,
+                        "tomorrow_direction": "下周继续 weekly_focus 承接验证",
+                    },
+                )
+                assert status == 200
+            assert checkin_payload["can_generate_weekly_report"] is True
+            assert checkin_payload["project_progress_update"]["status"] == "updated"
+
+            status, report_payload = _post_json(
+                f"{backend_base}/api/weekly-report/generate",
+                {"week_id": WEEK_ID},
+            )
+            assert status == 200
+            report_output = report_payload["report_output"]
+            assert set(report_output) == {"completed_work", "next_week_plan", "weekly_reflection"}
+            assert all(report_output[section] for section in report_output)
+            assert len(report_payload["weekly_focus"]) >= 2
+            assert len(report_payload["weekly_report_versions"]) == 1
+
+            status, history_payload = _get_json(f"{backend_base}/api/history?days=7")
+            assert status == 200
+            assert len(history_payload["daily_records"]) >= 5
+            assert history_payload["weekly_reports"][0]["weekly_report"]["week_id"] == WEEK_ID
+
+            wednesday = next(
+                record
+                for record in history_payload["daily_records"]
+                if record["daily_goal"]["goal_date"] == "2026-06-10"
+            )
+            status, edit_payload = _post_json(
+                f"{backend_base}/api/checkin",
+                {
+                    "date": "2026-06-10",
+                    "goal_id": wednesday["daily_goal"]["id"],
+                    "completion_text": "Edited smoke check-in with a clearer artifact trail.",
+                    "felt_difficulty": 2,
+                    "tomorrow_direction": "Keep the weekly report revision path tight.",
+                },
+            )
+            assert status == 200
+            assert edit_payload["updated"] is True
+            assert edit_payload["weekly_report_refresh"]["status"] == "refreshed"
+
+            status, feedback_report = _post_json(
+                f"{backend_base}/api/weekly-report/feedback",
+                {
+                    "week_id": WEEK_ID,
+                    "message": "Make next week items more directly verifiable.",
+                },
+            )
+            assert status == 200
+            assert feedback_report["created"] is False
+            assert len(feedback_report["weekly_report_versions"]) >= 3
+
+            status, project_complete = _post_json(
+                f"{backend_base}/api/projects/lifecycle",
+                {"message": "微调一个编排规则的模型已经完成了，结果是 smoke 已验证。"},
+            )
+            assert status == 200
+            assert project_complete["status"] == "applied"
+            assert project_complete["action"] == "complete_project"
+        finally:
+            _stop_server(backend_server, backend_thread)
+            _stop_server(frontend_server, frontend_thread)
+
+    print("PASS: frontend/API smoke covers compact UI, project lifecycle, history edit, and weekly report revisions")
+
+
+if __name__ == "__main__":
+    main()

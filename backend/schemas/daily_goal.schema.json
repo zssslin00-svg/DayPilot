@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://daypilot.local/schemas/daily_goal_output.schema.json",
+  "title": "DayPilotDailyGoalOutput",
+  "description": "Structured output for one DayPilot workday daily goal.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "goal_date",
+    "main_goal",
+    "rationale",
+    "completion_criteria",
+    "estimated_minutes",
+    "difficulty",
+    "minimum_acceptable_result",
+    "stretch_challenge",
+    "do_not_do_today",
+    "goal_type",
+    "growth_tags",
+    "context_used"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "daily_goal.v1",
+      "description": "Schema version."
+    },
+    "goal_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Goal date in YYYY-MM-DD format."
+    },
+    "main_goal": {
+      "type": "string",
+      "minLength": 12,
+      "maxLength": 120,
+      "description": "The only main goal for today. It must be concrete and deliverable."
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 360,
+      "description": "Why this goal was chosen today."
+    },
+    "completion_criteria": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 5,
+      "uniqueItems": true,
+      "description": "Checkable completion criteria.",
+      "items": {
+        "type": "string",
+        "minLength": 8,
+        "maxLength": 140
+      }
+    },
+    "estimated_minutes": {
+      "type": "integer",
+      "minimum": 30,
+      "maximum": 150,
+      "description": "Estimated time in minutes."
+    },
+    "difficulty": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5,
+      "description": "Difficulty from 1 to 5."
+    },
+    "minimum_acceptable_result": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 220,
+      "description": "A smaller but real result that still counts as useful progress."
+    },
+    "stretch_challenge": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 220,
+      "description": "Optional extra work after the minimum result is complete."
+    },
+    "do_not_do_today": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "description": "Scope boundaries for today.",
+      "items": {
+        "type": "string",
+        "minLength": 6,
+        "maxLength": 120
+      }
+    },
+    "goal_type": {
+      "type": "string",
+      "enum": [
+        "design",
+        "coding",
+        "documentation",
+        "review",
+        "learning",
+        "research",
+        "debugging",
+        "testing",
+        "planning"
+      ]
+    },
+    "growth_tags": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_-]{1,39}$"
+      }
+    },
+    "context_used": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "primary_driver",
+        "tomorrow_direction_handling",
+        "continuity_note",
+        "difficulty_reason"
+      ],
+      "properties": {
+        "primary_driver": {
+          "type": "string",
+          "enum": [
+            "tomorrow_direction",
+            "last_week_focus",
+            "current_project",
+            "recent_unfinished_work",
+            "difficulty_adjustment",
+            "agent_decision"
+          ]
+        },
+        "tomorrow_direction_handling": {
+          "type": "string",
+          "enum": [
+            "empty_agent_decided",
+            "used_as_given",
+            "narrowed_to_daily_scope",
+            "partially_used",
+            "ignored_due_to_mismatch"
+          ]
+        },
+        "continuity_note": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 260
+        },
+        "difficulty_reason": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 260
+        }
+      }
+    }
+  }
+}

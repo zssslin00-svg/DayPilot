@@ -1,0 +1,9 @@
+[
+  {"id":"WD-01","suite":"workday_policy","date":"2026-03-02","scenario":"周一无 active goal","expected":"workday_goal_created"},
+  {"id":"WD-02","suite":"workday_policy","date":"2026-03-02","scenario":"周一已有 active goal","expected":"same_goal_reused"},
+  {"id":"WD-03","suite":"workday_policy","date":"2026-03-03","scenario":"周二读取 yesterday tomorrow_direction","expected":"tomorrow_direction_used"},
+  {"id":"WD-04","suite":"workday_policy","date":"2026-03-06","scenario":"周五未 check-in 时周报不可生成","expected":"weekly_report_not_ready"},
+  {"id":"WD-05","suite":"workday_policy","date":"2026-03-06","scenario":"周五提交 check-in 后可生成周报","expected":"friday_checkin_enables_report"},
+  {"id":"WD-06","suite":"workday_policy","date":"2026-03-07","scenario":"周六不生成目标","expected":"non_workday_skip"},
+  {"id":"WD-07","suite":"workday_policy","date":"2026-03-08","scenario":"周日不生成目标","expected":"non_workday_skip"}
+]

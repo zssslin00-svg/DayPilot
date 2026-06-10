@@ -1,0 +1,97 @@
+[
+  {
+    "schema_version": "daily_goal.v1",
+    "goal_date": "2026-06-08",
+    "main_goal": "定稿 DayPilot 每日目标输出 Schema 与 Goal Generator Prompt 初版",
+    "rationale": "用户未填写明天方向，因此优先承接上周计划中的目标生成模块。这个目标能形成可直接交给 Codex 集成的 Prompt/Schema 交付物。",
+    "completion_criteria": [
+      "完成 daily_goal.v1 JSON Schema，覆盖主目标、完成标准、难度、最低成果和今天不要做什么",
+      "完成 System Prompt 与 User Prompt 模板，并明确空明天方向和过大明天方向的处理规则",
+      "列出至少 8 条 Goal Critic 硬性审查规则"
+    ],
+    "estimated_minutes": 120,
+    "difficulty": 3,
+    "minimum_acceptable_result": "产出可复制到 prompts/goal_generation/ 的 Schema 与 Prompt 草案，并能通过一次人工审查。",
+    "stretch_challenge": "补充 2-3 个真实上下文示例，方便后续放入 evals/cases 做回归测试。",
+    "do_not_do_today": [
+      "不要同时设计周报 Prompt 或在线反馈修正 Prompt",
+      "不要扩展登录、多用户、日历或外部系统接入"
+    ],
+    "goal_type": "design",
+    "growth_tags": [
+      "agent_system_design",
+      "structured_output",
+      "prompt_engineering"
+    ],
+    "context_used": {
+      "primary_driver": "last_week_focus",
+      "tomorrow_direction_handling": "empty_agent_decided",
+      "continuity_note": "承接上周周报中的目标生成模块重点，先完成可集成的 Prompt 与 Schema。",
+      "difficulty_reason": "当前难度为 3，目标有设计产出但范围限定在每日目标生成，不扩展到周报或修正模块。"
+    }
+  },
+  {
+    "schema_version": "daily_goal.v1",
+    "goal_date": "2026-06-09",
+    "main_goal": "打通 /api/today-goal 的最小生成链路并保存首个 goal_version",
+    "rationale": "用户的明天方向是“把 DayPilot 后端全部实现完”，范围过大，因此缩小为今日可完成的后端最小闭环。该目标能验证 Goal Generator、Schema 校验和目标版本保存能否串起来。",
+    "completion_criteria": [
+      "GET /api/today-goal 在工作日且无 active goal 时能调用 Goal Generator",
+      "LLM 返回结果经过 daily_goal.v1 Schema 校验后保存到 daily_goals 和 goal_versions",
+      "同一天重复请求不会创建多个 active goal version",
+      "为成功生成、Schema 校验失败和已有目标三种路径补充基础测试"
+    ],
+    "estimated_minutes": 150,
+    "difficulty": 4,
+    "minimum_acceptable_result": "接口能用一份 mock LLM 输出完成 Schema 校验并保存 goal_version，即使暂不接真实模型。",
+    "stretch_challenge": "接入一次真实模型调用，并在失败时返回可诊断的错误信息。",
+    "do_not_do_today": [
+      "不要同时实现前端页面、周报生成或在线反馈修正",
+      "不要引入复杂多 Agent 编排或外部任务系统"
+    ],
+    "goal_type": "coding",
+    "growth_tags": [
+      "backend_api",
+      "agent_orchestration",
+      "mvp_delivery"
+    ],
+    "context_used": {
+      "primary_driver": "tomorrow_direction",
+      "tomorrow_direction_handling": "narrowed_to_daily_scope",
+      "continuity_note": "保留用户想实现后端的方向，但只选取今日目标生成的最小可验证链路。",
+      "difficulty_reason": "最近完成率较高且该任务涉及 API、模型调用和数据库保存，难度设为 4，但限制在 150 分钟内。"
+    }
+  },
+  {
+    "schema_version": "daily_goal.v1",
+    "goal_date": "2026-06-10",
+    "main_goal": "完成 Goal Critic 硬性规则草案并整理成 guardrails 文档",
+    "rationale": "最近目标完成率偏低且多次反馈“太大、太虚”，今天应降低范围并产出可检查文档。该目标直接改善后续每日目标的清晰度和可完成性。",
+    "completion_criteria": [
+      "写出至少 10 条每日目标硬性失败规则，覆盖过大、过虚、无最低成果和无范围限制",
+      "写出 5 个评分维度及 1-5 分判断说明",
+      "整理出 Critic 输出结构，包含 passed、blocking_issues、warnings、scores 和 rewrite_instructions"
+    ],
+    "estimated_minutes": 75,
+    "difficulty": 2,
+    "minimum_acceptable_result": "完成一版包含硬性失败规则和评分维度的 guardrails 文档，即使暂不实现自动审查代码。",
+    "stretch_challenge": "补充 3 个失败样例及对应 rewrite_instructions，作为后续 evals/cases 输入。",
+    "do_not_do_today": [
+      "不要今天实现 Critic 的代码调用链",
+      "不要把规则扩展到周报审查，先只覆盖每日目标"
+    ],
+    "goal_type": "documentation",
+    "growth_tags": [
+      "goal_quality",
+      "agent_guardrails",
+      "evaluation_design"
+    ],
+    "context_used": {
+      "primary_driver": "difficulty_adjustment",
+      "tomorrow_direction_handling": "partially_used",
+      "continuity_note": "承接用户想提升目标质量的方向，但先用文档化规则解决目标太大和太虚的问题。",
+      "difficulty_reason": "最近完成率偏低且主观难度偏高，因此将范围压缩为 75 分钟内可完成的文档交付。"
+    }
+  }
+]
+

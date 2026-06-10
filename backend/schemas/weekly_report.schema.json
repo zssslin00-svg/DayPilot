@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://daypilot.local/schemas/weekly_report.schema.json",
+  "title": "DayPilotWeeklyReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["completed_work", "next_week_plan", "weekly_reflection"],
+  "properties": {
+    "completed_work": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 4,
+      "items": {
+        "type": "string",
+        "minLength": 8,
+        "maxLength": 60
+      }
+    },
+    "next_week_plan": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 4,
+      "items": {
+        "type": "string",
+        "minLength": 8,
+        "maxLength": 60
+      }
+    },
+    "weekly_reflection": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 4,
+      "items": {
+        "type": "string",
+        "minLength": 8,
+        "maxLength": 70
+      }
+    }
+  }
+}

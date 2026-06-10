@@ -1,0 +1,8 @@
+[
+  {"id":"WR-01","suite":"weekly_report","title":"部分完成不写成已完成","input":{"unfinished":["weekly report UI"],"friday_direction":"下周补 weekly_focus 承接"},"expected":{"must":["three_sections","facts_only","weekly_focus"],"must_not":["unfinished_as_done","weekday_log"]},"tags":["facts"]},
+  {"id":"WR-02","suite":"weekly_report","title":"同一主线合并提炼","input":{"theme":"goal-feedback API","friday_direction":"下周补反馈评估样例"},"expected":{"must":["three_sections","not_daily_log"],"must_not":["weekday_log"]},"tags":["summary"]},
+  {"id":"WR-03","suite":"weekly_report","title":"修正率高要复盘范围","input":{"theme":"goal critic","high_revision":true,"friday_direction":"下周缩小目标颗粒度"},"expected":{"must":["reflection","scope_review"],"must_not":["empty_praise"]},"tags":["reflection"]},
+  {"id":"WR-04","suite":"weekly_report","title":"高完成高难度不继续加压","input":{"theme":"weekly report generator","hard_week":true,"friday_direction":"下周保持同等粒度"},"expected":{"must":["reflection","next_week_result_goal"],"must_not":["overpromise"]},"tags":["difficulty"]},
+  {"id":"WR-05","suite":"weekly_report","title":"无明天方向也能提取重点","input":{"theme":"workday policy","friday_direction":""},"expected":{"must":["three_sections","weekly_focus"],"must_not":["empty_plan"]},"tags":["focus_extraction"]},
+  {"id":"WR-06","suite":"weekly_report","title":"外部依赖只写本地成果","input":{"theme":"dependency fallback","blocker":true,"friday_direction":"下周先做替代验证"},"expected":{"must":["facts_only","next_week_result_goal"],"must_not":["blocked_as_done"]},"tags":["blocker"]}
+]

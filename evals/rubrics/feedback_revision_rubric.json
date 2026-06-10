@@ -1,0 +1,12 @@
+{
+  "suite": "feedback_revision",
+  "pass_score": 80,
+  "dimensions": {
+    "feedback_type": 15,
+    "user_intent": 25,
+    "context_preserved": 15,
+    "scope_fields_changed": 20,
+    "version_and_memory": 15,
+    "usability": 10
+  }
+}
