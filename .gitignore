@@ -22,6 +22,7 @@ Desktop.ini
 
 .codex/
 启动命令.md
+docs/**/*.docx
 
 .env
 .env.*
