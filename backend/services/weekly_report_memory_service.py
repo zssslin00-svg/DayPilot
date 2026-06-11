@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from backend.config.runtime_paths import default_backup_dir
 from backend.config.settings import DayPilotSettings
 from backend.repositories import daypilot_repository as repo
 from backend.repositories.database import initialize_database
@@ -18,7 +19,7 @@ from backend.services.soul_context import SOUL_PATH
 PROMPT_VERSION_MOCK = "weekly_report_memory_v1_mock"
 PROMPT_VERSION_DEEPSEEK = "weekly_report_memory_v1_deepseek"
 MOCK_MODEL_NAME = "mock-weekly-report-memory-adapter"
-WEEKLY_REPORT_MEMORY_BACKUP_DIR = Path(__file__).resolve().parents[2] / "data" / "backups"
+WEEKLY_REPORT_MEMORY_BACKUP_DIR = default_backup_dir()
 
 WEEKLY_REPORT_MEMORY_KEYS = (
     "style_preferences",

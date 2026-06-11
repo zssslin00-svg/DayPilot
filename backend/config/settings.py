@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+from backend.config.runtime_paths import default_env_path, default_llm_log_dir
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_ENV_PATH = PROJECT_ROOT / ".env"
+DEFAULT_ENV_PATH = default_env_path()
 
 
 @dataclass(frozen=True)
@@ -20,7 +20,7 @@ class DayPilotSettings:
     deepseek_max_tokens: int
     deepseek_thinking: str
     llm_log_enabled: bool = True
-    llm_log_dir: str = str(PROJECT_ROOT / "data" / "llm_logs")
+    llm_log_dir: str = str(default_llm_log_dir())
 
     @property
     def has_deepseek_key(self) -> bool:
@@ -58,7 +58,7 @@ def load_daypilot_settings(
         deepseek_max_tokens=_positive_int(merged.get("DEEPSEEK_MAX_TOKENS"), 1600),
         deepseek_thinking=thinking,
         llm_log_enabled=_bool(merged.get("DAYPILOT_LLM_LOG_ENABLED"), default=True),
-        llm_log_dir=merged.get("DAYPILOT_LLM_LOG_DIR") or str(PROJECT_ROOT / "data" / "llm_logs"),
+        llm_log_dir=merged.get("DAYPILOT_LLM_LOG_DIR") or str(default_llm_log_dir()),
     )
 
 

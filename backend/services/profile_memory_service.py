@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from backend.config.runtime_paths import default_backup_dir
 from backend.config.settings import DayPilotSettings
 from backend.repositories import daypilot_repository as repo
 from backend.repositories.database import initialize_database
@@ -18,7 +19,7 @@ from backend.services.soul_context import SOUL_PATH, load_soul_context
 PROMPT_VERSION_MOCK = "profile_memory_v1_mock"
 PROMPT_VERSION_DEEPSEEK = "profile_memory_v1_deepseek"
 MOCK_MODEL_NAME = "mock-profile-memory-adapter"
-PROFILE_MEMORY_BACKUP_DIR = Path(__file__).resolve().parents[2] / "data" / "backups"
+PROFILE_MEMORY_BACKUP_DIR = default_backup_dir()
 
 PROFILE_STATUS_APPLIED = "applied"
 PROFILE_STATUS_SKIPPED = "skipped"

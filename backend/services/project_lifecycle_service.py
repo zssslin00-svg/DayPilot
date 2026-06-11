@@ -9,6 +9,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from backend.config.runtime_paths import default_backup_dir
 from backend.config.settings import DayPilotSettings
 from backend.repositories import daypilot_repository as repo
 from backend.repositories.database import DEFAULT_DB_PATH, initialize_database
@@ -19,7 +20,7 @@ from backend.services.soul_context import SOUL_PATH
 PROMPT_VERSION_MOCK = "project_lifecycle_v2_mock"
 PROMPT_VERSION_DEEPSEEK = "project_lifecycle_v2_deepseek"
 MOCK_MODEL_NAME = "mock-project-lifecycle-adapter"
-PROJECT_BACKUP_DIR = Path(__file__).resolve().parents[2] / "data" / "backups"
+PROJECT_BACKUP_DIR = default_backup_dir()
 
 ACTION_VALUES = {"create_project", "complete_project", "update_project", "delete_project", "no_change"}
 PRIORITY_VALUES = {"P0", "P1", "P2"}

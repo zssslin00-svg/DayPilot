@@ -3,12 +3,15 @@ from __future__ import annotations
 import sqlite3
 import sys
 import tempfile
+import os
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from backend.config import runtime_paths as runtime_path_config  # noqa: E402
+from scripts.package_launcher import prepare_user_runtime  # noqa: E402
 from scripts.restore_db import latest_backup, restore_database  # noqa: E402
 from scripts.start_daypilot import (  # noqa: E402
     StartupError,
@@ -26,6 +29,10 @@ def test_start_stop_scripts_are_portable_and_keep_state_under_data_tmp() -> None
         ROOT / "scripts" / "start_daypilot.py",
         ROOT / "scripts" / "stop_daypilot.py",
         ROOT / "scripts" / "serve_frontend.py",
+        ROOT / "scripts" / "package_launcher.py",
+        ROOT / "scripts" / "build_package.py",
+        ROOT / "scripts" / "build_windows.py",
+        ROOT / "scripts" / "build_macos.py",
         ROOT / "scripts" / "start_daypilot.bat",
         ROOT / "scripts" / "stop_daypilot.bat",
         ROOT / "scripts" / "restore_latest_db.bat",
@@ -40,6 +47,47 @@ def test_start_stop_scripts_are_portable_and_keep_state_under_data_tmp() -> None
     assert paths.frontend_pid_file == ROOT / "data" / "tmp" / "frontend.pid"
     assert paths.backend_out_log == ROOT / "data" / "tmp" / "backend.out.log"
     assert paths.frontend_err_log == ROOT / "data" / "tmp" / "frontend.err.log"
+
+
+def test_package_launcher_prepares_user_runtime_and_env_paths() -> None:
+    keys = [
+        "DAYPILOT_DATA_DIR",
+        "DAYPILOT_SOUL_PATH",
+        "DAYPILOT_ENV_PATH",
+        "DAYPILOT_SCHEMA_PATH",
+        "DAYPILOT_LLM_LOG_DIR",
+    ]
+    previous = {key: os.environ.get(key) for key in keys}
+    try:
+        for key in keys:
+            os.environ.pop(key, None)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "app"
+            data_dir = Path(temp_dir) / "user-data"
+            (root / "scripts").mkdir(parents=True)
+            (root / "frontend" / "pages").mkdir(parents=True)
+            (root / "scripts" / "init_db.sql").write_text("-- schema\n", encoding="utf-8")
+            (root / "frontend" / "pages" / "index.html").write_text("<!doctype html>\n", encoding="utf-8")
+            (root / "SOUL.example.md").write_text("# Example SOUL\n", encoding="utf-8")
+            (root / ".env.example").write_text(
+                "DAYPILOT_LLM_MODE=deepseek\nDEEPSEEK_API_KEY=\n",
+                encoding="utf-8",
+            )
+
+            paths = prepare_user_runtime(root, data_dir)
+
+            assert paths["db_path"] == data_dir / "db" / "daypilot.sqlite3"
+            assert paths["soul_path"].read_text(encoding="utf-8") == "# Example SOUL\n"
+            assert "DAYPILOT_LLM_MODE=mock" in paths["env_path"].read_text(encoding="utf-8")
+            assert runtime_path_config.default_db_path() == data_dir / "db" / "daypilot.sqlite3"
+            assert runtime_path_config.default_soul_path() == data_dir / "SOUL.md"
+            assert runtime_path_config.default_schema_path() == root / "scripts" / "init_db.sql"
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def test_start_script_fails_fast_without_deepseek_key() -> None:
@@ -162,6 +210,7 @@ def test_restore_script_restores_latest_backup_and_protects_current_db() -> None
 
 def main() -> None:
     test_start_stop_scripts_are_portable_and_keep_state_under_data_tmp()
+    test_package_launcher_prepares_user_runtime_and_env_paths()
     test_start_script_fails_fast_without_deepseek_key()
     test_start_script_allows_mock_without_deepseek_key()
     test_start_script_initializes_database_when_missing()

@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.config.runtime_paths import PROJECT_ROOT, default_soul_path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SOUL_PATH = PROJECT_ROOT / "SOUL.md"
+SOUL_PATH = default_soul_path()
 
 
 @dataclass(frozen=True)

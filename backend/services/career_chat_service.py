@@ -8,6 +8,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from backend.config.runtime_paths import default_backup_dir
 from backend.config.settings import DayPilotSettings
 from backend.repositories import daypilot_repository as repo
 from backend.repositories.database import DEFAULT_DB_PATH, initialize_database
@@ -19,7 +20,7 @@ from backend.services.workday_policy import today_in_workday_timezone
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CAREER_CHAT_SCHEMA_PATH = PROJECT_ROOT / "backend" / "schemas" / "career_chat_response.schema.json"
-CAREER_BACKUP_DIR = PROJECT_ROOT / "data" / "backups"
+CAREER_BACKUP_DIR = default_backup_dir()
 
 PROMPT_VERSION_MOCK = "career_chat_v1_mock"
 PROMPT_VERSION_DEEPSEEK = "career_chat_v1_deepseek"

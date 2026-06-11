@@ -6,15 +6,22 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from backend.config.runtime_paths import (
+    PROJECT_ROOT,
+    default_backup_dir,
+    default_data_dir,
+    default_llm_log_dir,
+    default_tmp_dir,
+)
 from backend.repositories.database import DEFAULT_DB_PATH
 from backend.services.soul_context import SOUL_PATH
 from backend.services.soul_sync_service import retry_soul_sync_jobs
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-BACKUP_DIR = PROJECT_ROOT / "data" / "backups"
-LLM_LOG_DIR = PROJECT_ROOT / "data" / "llm_logs"
-TMP_DIR = PROJECT_ROOT / "data" / "tmp"
+DATA_DIR = default_data_dir()
+BACKUP_DIR = default_backup_dir()
+LLM_LOG_DIR = default_llm_log_dir()
+TMP_DIR = default_tmp_dir()
 
 ONE_DAY_SECONDS = 24 * 60 * 60
 
@@ -30,11 +37,10 @@ def run_runtime_maintenance(
     db_path: str | Path = DEFAULT_DB_PATH,
     soul_path: str | Path = SOUL_PATH,
     now: datetime | None = None,
-    root: str | Path = PROJECT_ROOT,
+    root: str | Path | None = None,
 ) -> dict[str, Any]:
     current = now or datetime.now()
-    project_root = Path(root)
-    cleanup_result = cleanup_runtime_data(now=current, root=project_root)
+    cleanup_result = cleanup_runtime_data(now=current, root=root)
     retry_result = retry_soul_sync_jobs(db_path, soul_path=soul_path).payload
     return {
         "cleanup": cleanup_result,
@@ -45,13 +51,19 @@ def run_runtime_maintenance(
 def cleanup_runtime_data(
     *,
     now: datetime | None = None,
-    root: str | Path = PROJECT_ROOT,
+    root: str | Path | None = PROJECT_ROOT,
+    data_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     current = now or datetime.now()
-    project_root = Path(root)
-    backup_dir = project_root / "data" / "backups"
-    llm_log_dir = project_root / "data" / "llm_logs"
-    tmp_dir = project_root / "data" / "tmp"
+    if data_dir is not None:
+        runtime_data_dir = Path(data_dir)
+    elif root is None:
+        runtime_data_dir = DATA_DIR
+    else:
+        runtime_data_dir = Path(root) / "data"
+    backup_dir = runtime_data_dir / "backups"
+    llm_log_dir = runtime_data_dir / "llm_logs"
+    tmp_dir = runtime_data_dir / "tmp"
 
     deleted: dict[str, list[str]] = {
         "database_backups": [],

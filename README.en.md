@@ -231,6 +231,28 @@ Core data flow:
 | Linux | Source-run support: use `python3 scripts/start_daypilot.py`. |
 | Mobile browser | The pages have a responsive layout; the service still needs to run on a computer. |
 
+## Packaging
+
+DayPilot can be packaged with PyInstaller as a Windows EXE or a macOS/Linux folder package. Build on the target OS: build Windows packages on Windows and macOS packages on macOS. The package entrypoint is `scripts/package_launcher.py`; it stores user data in the OS user-data directory instead of the install directory.
+
+Windows:
+
+```bat
+cd /d D:\tools\vibe_coding\xiangmu\DayPilot
+python -m pip install pyinstaller
+python scripts\build_windows.py
+```
+
+macOS:
+
+```bash
+cd /path/to/DayPilot
+python3 -m pip install pyinstaller
+python3 scripts/build_macos.py
+```
+
+See the [Packaging Guide](docs/packaging.md) for details.
+
 ## Development And Verification
 
 Run all evals:

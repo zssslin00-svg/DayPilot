@@ -231,6 +231,28 @@ docs/                    README 图片资产和公开运行说明
 | Linux | 源码运行支持：使用 `python3 scripts/start_daypilot.py`。 |
 | 移动端浏览器 | 页面有响应式布局；服务仍需要在一台电脑上启动。 |
 
+## 发布打包
+
+DayPilot 支持用 PyInstaller 打成 Windows EXE、macOS/Linux 目录包。构建必须在目标系统上执行：Windows 包在 Windows 上打，macOS 包在 macOS 上打。发布入口是 `scripts/package_launcher.py`，它会把用户数据写到系统用户目录，而不是安装目录。
+
+Windows：
+
+```bat
+cd /d D:\tools\vibe_coding\xiangmu\DayPilot
+python -m pip install pyinstaller
+python scripts\build_windows.py
+```
+
+macOS：
+
+```bash
+cd /path/to/DayPilot
+python3 -m pip install pyinstaller
+python3 scripts/build_macos.py
+```
+
+更完整的发布说明见 [Packaging Guide](docs/packaging.md)。
+
 ## 开发与验证
 
 运行所有 eval：
