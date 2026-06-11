@@ -1047,7 +1047,7 @@ def _render_current_projects_section(active_projects: list[dict[str, Any]]) -> s
     lines.extend(
         [
             "",
-            "本段落由 DayPilot 管理，也可以手动编辑。使用单行清单维护 active 项目；从列表移除的项目会标记完成，写“暂无 active 项目。”表示当前没有 active 项目。",
+            "本段落由 DayPilot 管理，也可以手动编辑。使用单行清单维护 active 项目；DayPilot 会把前端仍 active 的项目补写到这里，以保留未完成承接状态。",
             "",
             "每日生成规则：",
             "",

@@ -80,7 +80,7 @@ def _event_count(db_path: Path) -> int:
         connection.close()
 
 
-def test_soul_project_import_adds_updates_renames_completes_and_is_idempotent() -> None:
+def test_soul_project_import_adds_updates_renames_and_preserves_frontend_active_projects() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         db_path = root / "soul-import.sqlite3"
@@ -147,23 +147,29 @@ def test_soul_project_import_adds_updates_renames_completes_and_is_idempotent() 
         _write_soul(
             soul_path,
             """
-1. P0 Alpha 改名后项目。
+1. P0 Alpha 改名后项目：当前进度：SOUL 继续推进。
 """,
         )
         completed = import_current_projects_from_soul(db_path, soul_path=soul_path, today=WORKDAY).payload
         assert completed["status"] == "applied"
-        assert completed["completed_count"] == 1
+        assert completed["direction"] == "soul_to_frontend"
+        assert completed["soul_patched_count"] == 1
+        assert completed["updated_count"] == 1
+        assert completed["completed_count"] == 0
 
         connection = initialize_database(db_path)
         try:
+            alpha_after = repo.get_project(connection, 1)
             beta_after = repo.get_project_by_name(connection, "Beta 项目")
             active_names = [project["name"] for project in repo.list_projects(connection)]
             profile = repo.get_user_profile(connection)
         finally:
             connection.close()
-        assert beta_after["status"] == "completed"
-        assert active_names == ["Alpha 改名后项目"]
-        assert profile["current_focus_projects"] == ["Alpha 改名后项目"]
+        assert alpha_after["status_summary"] == "SOUL 继续推进"
+        assert beta_after["status"] == "active"
+        assert active_names == ["Alpha 改名后项目", "Beta 项目"]
+        assert profile["current_focus_projects"] == ["Alpha 改名后项目", "Beta 项目"]
+        assert "Beta 项目" in soul_path.read_text(encoding="utf-8")
 
 
 def test_soul_project_import_no_active_projects_clears_profile_projects() -> None:
@@ -177,7 +183,9 @@ def test_soul_project_import_no_active_projects_clears_profile_projects() -> Non
         result = import_current_projects_from_soul(db_path, soul_path=soul_path, today=WORKDAY).payload
 
         assert result["status"] == "applied"
-        assert result["completed_count"] == 1
+        assert result["direction"] == "soul_to_frontend"
+        assert result["soul_patched_count"] == 1
+        assert result["completed_count"] == 0
 
         connection = initialize_database(db_path)
         try:
@@ -187,10 +195,10 @@ def test_soul_project_import_no_active_projects_clears_profile_projects() -> Non
         finally:
             connection.close()
 
-        assert active_projects == []
-        assert alpha["status"] == "completed"
-        assert profile["current_focus_projects"] == []
-        assert profile["goal_preferences"]["project_priorities"] == []
+        assert [project["name"] for project in active_projects] == ["Alpha 项目"]
+        assert alpha["status"] == "active"
+        assert profile["current_focus_projects"] == ["Alpha 项目"]
+        assert "Alpha 项目" in soul_path.read_text(encoding="utf-8")
 
 
 def test_soul_project_import_legacy_goal_backfills_final_and_today_goal() -> None:
@@ -266,12 +274,12 @@ def test_soul_project_import_llm_fallback_parses_prose_section() -> None:
 
 
 def main() -> None:
-    test_soul_project_import_adds_updates_renames_completes_and_is_idempotent()
+    test_soul_project_import_adds_updates_renames_and_preserves_frontend_active_projects()
     test_soul_project_import_no_active_projects_clears_profile_projects()
     test_soul_project_import_legacy_goal_backfills_final_and_today_goal()
     test_soul_project_import_accepts_non_list_priority_lines()
     test_soul_project_import_llm_fallback_parses_prose_section()
-    print("PASS: SOUL.md current project import adds, updates, renames, completes, and stays idempotent")
+    print("PASS: SOUL.md current project import adds, updates, renames, and preserves frontend active projects")
 
 
 if __name__ == "__main__":

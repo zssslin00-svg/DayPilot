@@ -3,11 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from backend.config.runtime_paths import default_backup_dir
 from backend.repositories import daypilot_repository as repo
 from backend.repositories.database import DEFAULT_DB_PATH, initialize_database
 from backend.services.llm_client import generate_json_with_fallback
@@ -24,6 +26,8 @@ LIST_ITEM_PATTERN = re.compile(r"^\s*(?:[-*+]|(?:\d+)[.)、])\s+(.+?)\s*$")
 STOP_LINES = ("本段落由 DayPilot 管理", "每日生成规则", "项目的当前进度")
 EMPTY_PROJECT_MARKERS = ("暂无 active 项目", "暂无当前项目", "当前 active 项目有 0 个")
 PRIORITY_VALUES = {"P0", "P1", "P2"}
+ACTIVE_COUNT_PATTERN = re.compile(r"当前\s*active\s*项目(?:有|共|数量)?\s*[:：]?\s*\d+\s*个", flags=re.IGNORECASE)
+PROJECT_IMPORT_BACKUP_DIR = default_backup_dir()
 
 
 @dataclass(frozen=True)
@@ -60,10 +64,6 @@ def import_current_projects_from_soul(
     declares_no_active_projects = _section_declares_no_active_projects(section_text)
     if not entries and not declares_no_active_projects:
         entries = _parse_project_entries_with_llm(project_parse_text, soul_path=path)
-    if not entries and not declares_no_active_projects:
-        raise SoulProjectImportError("SOUL.md 当前项目段落没有可识别的项目列表。")
-
-    _ensure_unique_names(entries)
     section_hash = _hash_text(section_text)
     connection = initialize_database(db_path)
     try:
@@ -74,11 +74,34 @@ def import_current_projects_from_soul(
         connection.close()
 
     previous_snapshot = previous_state.get("snapshot") if previous_state else {}
+    if not isinstance(previous_snapshot, dict):
+        previous_snapshot = {}
+    soul_patch = _merge_frontend_active_projects_into_soul(
+        path,
+        section_text=section_text,
+        entries=entries,
+        active_projects=active_projects,
+        previous_snapshot=previous_snapshot,
+    )
+    if soul_patch is not None:
+        section_text = _extract_current_projects_section(path)
+        project_parse_text = _project_parse_region(section_text)
+        entries = _parse_project_entries(project_parse_text)
+        declares_no_active_projects = _section_declares_no_active_projects(section_text)
+        if not entries and not declares_no_active_projects:
+            entries = _parse_project_entries_with_llm(project_parse_text, soul_path=path)
+        section_hash = _hash_text(section_text)
+
+    if not entries and not declares_no_active_projects and not active_projects:
+        raise SoulProjectImportError("SOUL.md 当前项目段落没有可识别的项目列表。")
+
+    _ensure_unique_names(entries)
+
     lifecycle_output, planned_actions = _build_lifecycle_output(
         entries,
         active_projects=active_projects,
         all_projects=all_projects,
-        previous_snapshot=previous_snapshot if isinstance(previous_snapshot, dict) else {},
+        previous_snapshot=previous_snapshot,
     )
     message = _import_message(section_hash)
     if lifecycle_output["items"]:
@@ -98,18 +121,22 @@ def import_current_projects_from_soul(
         ).payload
     else:
         lifecycle_payload = {
-            "status": "no_change",
+            "status": "applied" if soul_patch else "no_change",
             "action": "soul_project_import",
             "items": [],
             "applied_count": 0,
             "failed_count": 0,
             "today_goal_refresh_failed_count": 0,
-            "soul_synced": False,
-            "soul_backup": None,
+            "soul_synced": bool(soul_patch),
+            "soul_backup": soul_patch["backup_path"] if soul_patch else None,
             "soul_sync_queued": False,
             "soul_sync_retry_job_id": None,
             "soul_sync_error": None,
-            "message": "SOUL.md 当前项目没有变化。",
+            "message": (
+                "已把前端 active 项目补写入 SOUL.md。"
+                if soul_patch
+                else "SOUL.md 当前项目没有变化。"
+            ),
         }
     if declares_no_active_projects:
         _sync_no_active_project_preferences(db_path)
@@ -124,8 +151,12 @@ def import_current_projects_from_soul(
     payload = {
         "status": _import_status(lifecycle_payload),
         "source": "SOUL.md",
+        "target": "frontend",
+        "direction": "soul_to_frontend",
         "section_hash": section_hash,
         "parsed_project_count": len(entries),
+        "soul_patched_count": soul_patch["count"] if soul_patch else 0,
+        "soul_patched_project_names": soul_patch["project_names"] if soul_patch else [],
         "created_count": counts["create_project"],
         "updated_count": counts["update_project"],
         "renamed_count": counts["rename_project"],
@@ -134,7 +165,7 @@ def import_current_projects_from_soul(
         "items": lifecycle_payload.get("items") or [],
         "lifecycle": lifecycle_payload,
         "active_projects": final_snapshot["projects"],
-        "message": _result_message(counts, lifecycle_payload),
+        "message": _result_message(counts, lifecycle_payload, soul_patch=soul_patch),
     }
     return SoulProjectImportResult(payload)
 
@@ -560,6 +591,181 @@ def _ensure_unique_names(entries: list[SoulProjectEntry]) -> None:
         seen.add(key)
 
 
+def _merge_frontend_active_projects_into_soul(
+    soul_path: Path,
+    *,
+    section_text: str,
+    entries: list[SoulProjectEntry],
+    active_projects: list[dict[str, Any]],
+    previous_snapshot: dict[str, Any],
+) -> dict[str, Any] | None:
+    covered_ids = _active_project_ids_covered_by_entries(
+        entries,
+        active_projects=active_projects,
+        previous_snapshot=previous_snapshot,
+    )
+    missing_projects = [project for project in active_projects if int(project["id"]) not in covered_ids]
+    if not missing_projects:
+        return None
+
+    backup_path = _backup_soul(soul_path)
+    rendered = _merge_current_project_section_text(section_text, entries, missing_projects)
+    _write_current_projects_section(soul_path, rendered)
+    return {
+        "count": len(missing_projects),
+        "project_names": [str(project.get("name") or "") for project in missing_projects],
+        "backup_path": str(backup_path),
+    }
+
+
+def _active_project_ids_covered_by_entries(
+    entries: list[SoulProjectEntry],
+    *,
+    active_projects: list[dict[str, Any]],
+    previous_snapshot: dict[str, Any],
+) -> set[int]:
+    active_by_name = {_name_key(project["name"]): project for project in active_projects}
+    active_by_id = {int(project["id"]): project for project in active_projects}
+    active_by_position = {index: project for index, project in enumerate(active_projects, start=1)}
+    previous_by_position = _previous_projects_by_position(previous_snapshot)
+    parsed_name_keys = {_name_key(entry.name) for entry in entries}
+    covered_ids: set[int] = set()
+
+    for entry in entries:
+        exact = active_by_name.get(_name_key(entry.name))
+        if exact is not None:
+            covered_ids.add(int(exact["id"]))
+            continue
+
+        candidate = None
+        previous = previous_by_position.get(entry.position)
+        if previous is not None:
+            project_id = _safe_int(previous.get("project_id"))
+            candidate = active_by_id.get(project_id) if project_id is not None else None
+        if candidate is None:
+            candidate = active_by_position.get(entry.position)
+        if candidate is None:
+            continue
+        candidate_id = int(candidate["id"])
+        if candidate_id not in covered_ids and _name_key(candidate["name"]) not in parsed_name_keys:
+            covered_ids.add(candidate_id)
+    return covered_ids
+
+
+def _merge_current_project_section_text(
+    section_text: str,
+    entries: list[SoulProjectEntry],
+    missing_projects: list[dict[str, Any]],
+) -> str:
+    lines = section_text.splitlines() or [SECTION_TITLE]
+    total_count = len(entries) + len(missing_projects)
+    count_line_seen = False
+    retained: list[str] = []
+    insert_index: int | None = None
+
+    for line in lines:
+        stripped = line.strip()
+        if _is_empty_project_marker_line(stripped):
+            continue
+        if ACTIVE_COUNT_PATTERN.search(stripped):
+            retained.append(_active_project_count_line(total_count))
+            count_line_seen = True
+            continue
+        if insert_index is None and any(stripped.startswith(marker) for marker in STOP_LINES):
+            insert_index = len(retained)
+        retained.append(line)
+
+    if not count_line_seen:
+        retained, insert_index = _insert_active_project_count_line(retained, total_count, insert_index)
+
+    if insert_index is None:
+        insert_index = len(retained)
+    while insert_index > 0 and retained[insert_index - 1].strip() == "":
+        insert_index -= 1
+
+    missing_lines = [
+        _render_frontend_project_line(len(entries) + offset, project)
+        for offset, project in enumerate(missing_projects, start=1)
+    ]
+    next_lines = retained[:insert_index]
+    if next_lines and next_lines[-1].strip() != "":
+        next_lines.append("")
+    next_lines.extend(missing_lines)
+    tail = retained[insert_index:]
+    if tail and tail[0].strip() != "":
+        next_lines.append("")
+    next_lines.extend(tail)
+    return "\n".join(next_lines).rstrip()
+
+
+def _insert_active_project_count_line(
+    lines: list[str],
+    total_count: int,
+    insert_index: int | None,
+) -> tuple[list[str], int | None]:
+    count_lines = ["", _active_project_count_line(total_count), ""]
+    if lines and lines[0].strip() == SECTION_TITLE:
+        next_lines = lines[:1] + count_lines + lines[1:]
+        if insert_index is not None and insert_index >= 1:
+            insert_index += len(count_lines)
+        return next_lines, insert_index
+    return [SECTION_TITLE, *count_lines, *lines], (
+        insert_index + len(count_lines) + 1 if insert_index is not None else None
+    )
+
+
+def _is_empty_project_marker_line(text: str) -> bool:
+    return any(marker in text for marker in EMPTY_PROJECT_MARKERS)
+
+
+def _active_project_count_line(total_count: int) -> str:
+    return (
+        f"当前 active 项目有 {total_count} 个。每日目标生成时，每个 active 项目都要生成一个符合用户习惯的"
+        "今日目标；不要在多个项目之间挑选单一主目标。"
+    )
+
+
+def _render_frontend_project_line(index: int, project: dict[str, Any]) -> str:
+    priority = str(project.get("priority") or "P2").strip() or "P2"
+    name = _soul_line_value(project.get("name"), limit=120)
+    summary = _soul_line_value(project.get("status_summary"), limit=180)
+    target = _soul_line_value(repo.project_target_goal(project), limit=160)
+    today_goal = _soul_line_value(repo.project_today_goal(project), limit=160)
+    parts = [f"{priority} {name}"]
+    if summary:
+        parts.append(f"当前进度：{summary}")
+    if target:
+        parts.append(f"项目最终目标：{target}")
+    if today_goal:
+        parts.append(f"项目今日目标：{today_goal}")
+    parts.append("状态：active，保留未完成承接")
+    return f"{index}. {'；'.join(parts)}。"
+
+
+def _soul_line_value(value: Any, *, limit: int) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    text = re.sub(r"[。；;]+", "，", text).strip(" ，,")
+    return text[:limit].strip()
+
+
+def _backup_soul(soul_path: Path) -> Path:
+    PROJECT_IMPORT_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = PROJECT_IMPORT_BACKUP_DIR / f"SOUL_{stamp}.md"
+    shutil.copy2(soul_path, backup_path)
+    return backup_path
+
+
+def _write_current_projects_section(soul_path: Path, rendered_section: str) -> None:
+    text = soul_path.read_text(encoding="utf-8")
+    start = text.find(SECTION_TITLE)
+    if start < 0:
+        raise SoulProjectImportError("SOUL.md 缺少 ## 当前项目 段落。")
+    next_match = NEXT_SECTION_PATTERN.search(text, start + len(SECTION_TITLE))
+    end = next_match.start() if next_match else len(text)
+    soul_path.write_text(text[:start] + rendered_section + "\n\n" + text[end:].lstrip("\n"), encoding="utf-8")
+
+
 def _build_lifecycle_output(
     entries: list[SoulProjectEntry],
     *,
@@ -819,19 +1025,29 @@ def _import_status(lifecycle_payload: dict[str, Any]) -> str:
     return status if status in {"applied", "partial", "failed"} else "no_change"
 
 
-def _result_message(counts: dict[str, int], lifecycle_payload: dict[str, Any]) -> str:
+def _result_message(
+    counts: dict[str, int],
+    lifecycle_payload: dict[str, Any],
+    *,
+    soul_patch: dict[str, Any] | None,
+) -> str:
     if lifecycle_payload.get("status") == "failed":
         return lifecycle_payload.get("message") or "SOUL.md 项目同步失败。"
     changed = counts["create_project"] + counts["update_project"] + counts["rename_project"] + counts["complete_project"]
     if not changed:
+        if soul_patch:
+            return f"已把 {soul_patch['count']} 个前端 active 项目补写入 SOUL.md，SOUL 当前项目没有其它变化。"
         return "SOUL.md 当前项目没有变化。"
-    return (
+    message = (
         "SOUL.md 当前项目已同步："
         f"新增 {counts['create_project']}，"
         f"更新 {counts['update_project']}，"
         f"改名 {counts['rename_project']}，"
         f"完成 {counts['complete_project']}。"
     )
+    if soul_patch:
+        return f"已先把 {soul_patch['count']} 个前端 active 项目补写入 SOUL.md；{message}"
+    return message
 
 
 def _import_message(section_hash: str) -> str:
