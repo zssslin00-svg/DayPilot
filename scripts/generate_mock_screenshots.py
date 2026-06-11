@@ -281,7 +281,7 @@ def nav(img: Image.Image, selected: str = "today") -> None:
 def header(draw: ImageDraw.ImageDraw, left: int, right: int) -> None:
     draw_text(draw, (left, 48), "DAYPILOT", 11, BLUE, True)
     draw_text(draw, (left, 76), "日用工作台", 27, TEXT, True)
-    draw_text(draw, (right - 360, 56), "四小时有效工作时间，别把长期愿望压成一天任务。", 14, TEXT)
+    draw_text(draw, (right - 360, 56), "充分利用有效工作时间，别把长期愿望压成一天任务。", 14, TEXT)
 
 
 def section_shell(img: Image.Image, x0: int, y0: int, x1: int, y1: int, kicker: str, title: str) -> None:
