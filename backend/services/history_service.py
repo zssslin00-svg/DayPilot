@@ -38,7 +38,7 @@ def get_history(
     connection = initialize_database(db_path)
     try:
         daily_records = [
-            _attach_daily_payload(record)
+            _attach_daily_payload(record, default_date)
             for record in repo.list_daily_goal_records_between(
                 connection,
                 start.isoformat(),
@@ -64,7 +64,7 @@ def get_history(
         connection.close()
 
 
-def _attach_daily_payload(record: dict[str, Any]) -> dict[str, Any]:
+def _attach_daily_payload(record: dict[str, Any], current_date: date) -> dict[str, Any]:
     payload = dict(record)
     payload["goal_output"] = goal_output_from_record(
         {
@@ -72,7 +72,25 @@ def _attach_daily_payload(record: dict[str, Any]) -> dict[str, Any]:
             "active_version": record.get("active_version"),
         }
     )
+    checkin = record.get("daily_checkin")
+    checkin_editable = _is_checkin_editable(checkin, current_date)
+    payload["checkin_editable"] = checkin_editable
+    payload["checkin_edit_lock_reason"] = (
+        None if checkin is None or checkin_editable else "已过提交当天，仅展示最新可用版本。"
+    )
     return payload
+
+
+def _is_checkin_editable(checkin: dict[str, Any] | None, current_date: date) -> bool:
+    if not checkin:
+        return False
+    created_at = str(checkin.get("created_at") or "").strip()
+    if len(created_at) < 10:
+        return False
+    try:
+        return date.fromisoformat(created_at[:10]) == current_date
+    except ValueError:
+        return False
 
 
 def _attach_weekly_payload(connection, weekly_report: dict[str, Any]) -> dict[str, Any]:

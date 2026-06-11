@@ -669,6 +669,42 @@ button:focus-visible {
   gap: 10px;
 }
 
+.history-checkin .checkin-text-field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+}
+
+.history-checkin .checkin-text-field span,
+.history-checkin-meta dt {
+  color: var(--soft-ink);
+  font-size: 0.86rem;
+}
+
+.history-checkin-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.history-checkin-meta {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 7px 12px;
+  margin: 0;
+}
+
+.history-checkin-meta dt {
+  font-weight: 700;
+}
+
+.history-checkin-meta dd {
+  min-width: 0;
+  margin: 0;
+  color: #2d3035;
+  overflow-wrap: anywhere;
+}
+
 .history-edit-row {
   align-items: stretch;
 }

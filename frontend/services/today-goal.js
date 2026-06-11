@@ -706,8 +706,10 @@ function historyEntry(record) {
     entry.append(note);
   }
 
-  if (checkin) {
+  if (checkin && record.checkin_editable) {
     entry.append(historyCheckinForm(record, checkin));
+  } else if (checkin) {
+    entry.append(historyCheckinSummary(record, checkin));
   } else {
     const empty = document.createElement("p");
     empty.className = "muted compact";
@@ -729,6 +731,9 @@ function historyCheckinForm(record, checkin) {
   completion.rows = 3;
   completion.value = checkin.completion_text || "";
   completion.setAttribute("aria-label", "完成说明（可空）");
+  const completionLabel = document.createElement("label");
+  completionLabel.className = "checkin-text-field";
+  completionLabel.append(textBlock("span", "完成说明（可空）"), completion);
 
   const row = document.createElement("div");
   row.className = "history-edit-row";
@@ -763,6 +768,9 @@ function historyCheckinForm(record, checkin) {
   tomorrow.rows = 2;
   tomorrow.value = checkin.tomorrow_direction || "";
   tomorrow.setAttribute("aria-label", "明天方向（可空）");
+  const tomorrowLabel = document.createElement("label");
+  tomorrowLabel.className = "checkin-text-field";
+  tomorrowLabel.append(textBlock("span", "明天方向（可空）"), tomorrow);
 
   const button = document.createElement("button");
   button.className = "text-button secondary";
@@ -770,7 +778,7 @@ function historyCheckinForm(record, checkin) {
   button.textContent = "保存修改";
 
   row.append(status, difficulty, button);
-  form.append(completion, tomorrow, row);
+  form.append(completionLabel, tomorrowLabel, row);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const body = checkinBodyFromForm(form, {
@@ -784,6 +792,33 @@ function historyCheckinForm(record, checkin) {
     }
   });
   return form;
+}
+
+function historyCheckinSummary(record, checkin) {
+  const summary = document.createElement("div");
+  summary.className = "history-checkin-summary";
+
+  const reason = document.createElement("p");
+  reason.className = "muted compact";
+  reason.textContent = record.checkin_edit_lock_reason || "已过提交当天，仅展示最新可用版本。";
+
+  const meta = document.createElement("dl");
+  meta.className = "history-checkin-meta";
+  appendMeta(meta, "完成状态", checkin.completion_status === "completed" ? "完成" : "未完成");
+  appendMeta(meta, "主观难度", `难度 ${numberOrDash(checkin.felt_difficulty)}`);
+  appendMeta(meta, "完成说明", textOrDash(checkin.completion_text));
+  appendMeta(meta, "明天方向", textOrDash(checkin.tomorrow_direction));
+
+  summary.append(reason, meta);
+  return summary;
+}
+
+function appendMeta(container, label, value) {
+  const term = document.createElement("dt");
+  term.textContent = label;
+  const detail = document.createElement("dd");
+  detail.textContent = value;
+  container.append(term, detail);
 }
 
 function syncTodayCheckin(records) {

@@ -205,6 +205,47 @@ def test_checkin_updates_existing_submission() -> None:
             connection.close()
 
 
+def test_checkin_rejects_edit_after_submission_day() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = Path(temp_dir) / "daypilot-checkin-expired-update.sqlite3"
+        goal_id = _seed_goal(db_path, "2026-06-09")
+
+        first_status, _ = _post_checkin(
+            date(2026, 6, 9),
+            db_path,
+            {
+                "date": "2026-06-09",
+                "goal_id": goal_id,
+                "completion_text": "当天提交了初版 check-in。",
+                "felt_difficulty": 4,
+            },
+        )
+        second_status, second_payload = _post_checkin(
+            date(2026, 6, 10),
+            db_path,
+            {
+                "date": "2026-06-09",
+                "goal_id": goal_id,
+                "completion_text": "次日不应该覆盖历史 check-in。",
+                "felt_difficulty": 2,
+            },
+        )
+
+        assert first_status == 200
+        assert second_status == 400
+        assert second_payload["error"] == "invalid_checkin"
+        assert "提交当天" in second_payload["detail"]
+
+        connection = connect_database(db_path)
+        try:
+            checkin = repo.get_daily_checkin_by_date(connection, "2026-06-09")
+            assert checkin["completion_text"] == "当天提交了初版 check-in。"
+            assert checkin["felt_difficulty"] == 4
+            assert checkin["created_at"].startswith("2026-06-09")
+        finally:
+            connection.close()
+
+
 def test_checkin_rejects_invalid_felt_difficulty() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         db_path = Path(temp_dir) / "daypilot-checkin-invalid.sqlite3"
@@ -294,6 +335,7 @@ def main() -> None:
     test_checkin_allows_empty_text_fields_and_uses_completed_status_rate()
     test_checkin_empty_completion_text_uses_incomplete_status_rate()
     test_checkin_updates_existing_submission()
+    test_checkin_rejects_edit_after_submission_day()
     test_checkin_rejects_invalid_felt_difficulty()
     test_china_holiday_checkin_is_rejected()
     test_china_makeup_weekend_checkin_is_allowed()

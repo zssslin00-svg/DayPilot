@@ -54,6 +54,8 @@ def save_daily_checkin(
         with connection:
             daily_goal = _resolve_daily_goal(connection, checkin_date, requested_goal_id)
             existing = _get_existing_checkin_for_goal(connection, int(daily_goal["id"]))
+            if existing is not None and not _checkin_created_on(existing, default_date):
+                raise CheckinValidationError("check-in 只可在提交当天修改，已过期的历史记录仅展示最新可用版本。")
             record = {
                 "daily_goal_id": daily_goal["id"],
                 "checkin_date": checkin_date.isoformat(),
@@ -75,6 +77,7 @@ def save_daily_checkin(
             }
 
             if existing is None:
+                record["created_at"] = _checkin_timestamp_for_date(default_date)
                 checkin_id = repo.create_daily_checkin(connection, **record)
                 updated = False
             else:
@@ -193,6 +196,25 @@ def _get_existing_checkin_for_goal(connection, daily_goal_id: int) -> dict[str, 
         "SELECT * FROM daily_checkins WHERE daily_goal_id = ?",
         (daily_goal_id,),
     ).fetchone()
+
+
+def _checkin_created_on(checkin: dict[str, Any], current_date: date) -> bool:
+    try:
+        raw_created_at = checkin["created_at"]
+    except (KeyError, IndexError, TypeError):
+        raw_created_at = None
+    created_at = str(raw_created_at or "").strip()
+    if len(created_at) < 10:
+        return False
+    try:
+        created_date = date.fromisoformat(created_at[:10])
+    except ValueError:
+        return False
+    return created_date == current_date
+
+
+def _checkin_timestamp_for_date(value: date) -> str:
+    return f"{value.isoformat()} 00:00:00"
 
 
 def _all_goals_for_date_checked_in(connection, checkin_date: date) -> bool:

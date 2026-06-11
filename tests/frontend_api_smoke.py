@@ -299,11 +299,19 @@ def main() -> None:
                 for record in history_payload["daily_records"]
                 if record["daily_goal"]["goal_date"] == "2026-06-10"
             )
+            assert wednesday["checkin_editable"] is False
+            assert wednesday["checkin_edit_lock_reason"] == "已过提交当天，仅展示最新可用版本。"
+            friday = next(
+                record
+                for record in history_payload["daily_records"]
+                if record["daily_goal"]["id"] == goal_id
+            )
+            assert friday["checkin_editable"] is True
             status, edit_payload = _post_json(
                 f"{backend_base}/api/checkin",
                 {
-                    "date": "2026-06-10",
-                    "goal_id": wednesday["daily_goal"]["id"],
+                    "date": FRIDAY.isoformat(),
+                    "goal_id": friday["daily_goal"]["id"],
                     "completion_text": "Edited smoke check-in with a clearer artifact trail.",
                     "felt_difficulty": 2,
                     "tomorrow_direction": "Keep the weekly report revision path tight.",

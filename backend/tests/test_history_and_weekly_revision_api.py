@@ -183,6 +183,37 @@ def test_history_reflects_latest_active_goal_version() -> None:
         assert latest["goal_versions"][1]["version_no"] == 2
 
 
+def test_history_marks_checkin_editability_by_submission_day() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = Path(temp_dir) / "history-checkin-editability.sqlite3"
+        seeded = _seed_workweek(db_path)
+
+        connection = connect_database(db_path)
+        try:
+            with connection:
+                connection.execute(
+                    "UPDATE daily_checkins SET created_at = ? WHERE daily_goal_id = ?",
+                    ("2026-06-12 20:00:00", seeded["goal_by_date"]["2026-06-12"]),
+                )
+                connection.execute(
+                    "UPDATE daily_checkins SET created_at = ? WHERE daily_goal_id = ?",
+                    ("2026-06-11 20:00:00", seeded["goal_by_date"]["2026-06-11"]),
+                )
+        finally:
+            connection.close()
+
+        status, payload = _request(db_path, "GET", "/api/history?days=7", today=FRIDAY)
+
+        assert status == 200
+        records_by_date = {
+            record["daily_goal"]["goal_date"]: record for record in payload["daily_records"]
+        }
+        assert records_by_date["2026-06-12"]["checkin_editable"] is True
+        assert records_by_date["2026-06-12"]["checkin_edit_lock_reason"] is None
+        assert records_by_date["2026-06-11"]["checkin_editable"] is False
+        assert records_by_date["2026-06-11"]["checkin_edit_lock_reason"] == "已过提交当天，仅展示最新可用版本。"
+
+
 def test_weekly_report_feedback_creates_version_chain() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         db_path = Path(temp_dir) / "weekly-feedback.sqlite3"
@@ -237,6 +268,16 @@ def test_editing_checkin_refreshes_existing_weekly_report() -> None:
         assert len(payload["weekly_report_versions"]) == 1
 
         goal_id = seeded["goal_by_date"]["2026-06-10"]
+        connection = connect_database(db_path)
+        try:
+            with connection:
+                connection.execute(
+                    "UPDATE daily_checkins SET created_at = ? WHERE daily_goal_id = ?",
+                    ("2026-06-12 20:00:00", goal_id),
+                )
+        finally:
+            connection.close()
+
         status, updated = _request(
             db_path,
             "POST",
@@ -350,6 +391,7 @@ def _seed_workweek(db_path: Path) -> dict[str, Any]:
 def main() -> None:
     test_history_reads_existing_records_without_generating_goal()
     test_history_reflects_latest_active_goal_version()
+    test_history_marks_checkin_editability_by_submission_day()
     test_weekly_report_feedback_creates_version_chain()
     test_editing_checkin_refreshes_existing_weekly_report()
     print("PASS: history, weekly report feedback, and check-in refresh APIs verified")
