@@ -493,6 +493,7 @@ def _ensure_migration_project(connection: sqlite3.Connection) -> int:
                     "summary": "",
                     "planning_guidance": "",
                     "target_goal": "",
+                    "today_goal": "",
                     "facts": [],
                     "updated_from": {"source": "schema_migration"},
                 },
@@ -545,6 +546,7 @@ def _project_state_json_from_project_row(data: dict) -> str:
     summary = data.get("status_summary")
     planning_guidance = data.get("planning_bias")
     target_goal = legacy_payload.get("target_goal", existing_state.get("target_goal", ""))
+    today_goal = legacy_payload.get("today_goal", existing_state.get("today_goal", ""))
     state = {
         "schema_version": existing_state.get("schema_version") or "project_state.v1",
         "summary": str(summary if summary is not None else existing_state.get("summary", "") or "").strip(),
@@ -555,6 +557,7 @@ def _project_state_json_from_project_row(data: dict) -> str:
             or ""
         ).strip(),
         "target_goal": str(target_goal or "").strip(),
+        "today_goal": str(today_goal or "").strip(),
         "facts": existing_state.get("facts") if isinstance(existing_state.get("facts"), list) else [],
         "updated_from": {
             "source": "schema_migration",

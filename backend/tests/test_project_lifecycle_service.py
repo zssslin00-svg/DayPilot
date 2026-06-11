@@ -168,7 +168,8 @@ def test_deepseek_create_project_updates_db_profile_soul_and_event() -> None:
             "priority": "P0",
             "status_summary": "还没确定实现方案、数据集结构",
             "planning_bias": "优先安排实现方案比较、数据集结构设计、最小样例和可验证实验设计。",
-            "target_goal": "先确定方案和数据结构",
+            "target_goal": "形成可复查的规则编排微调方案",
+            "today_goal": "先确定方案和数据结构",
             "completion_summary": "",
             "confidence": 0.2,
             "reason": "用户明确要求新增 P0 项目。",
@@ -202,13 +203,16 @@ def test_deepseek_create_project_updates_db_profile_soul_and_event() -> None:
 
         assert project is not None
         assert project["status_summary"] == "还没确定实现方案、数据集结构"
+        assert repo.project_target_goal(project) == "形成可复查的规则编排微调方案"
+        assert repo.project_today_goal(project) == "先确定方案和数据结构"
         assert any(item["name"] == "微调一个编排规则的模型" for item in profile["goal_preferences"]["project_priorities"])
         assert "微调一个编排规则的模型" in profile["current_focus_projects"]
         assert events[0]["action"] == "create_project"
         soul_text = soul_path.read_text(encoding="utf-8")
         assert "微调一个编排规则的模型" in soul_text
         assert "当前进度：还没确定实现方案、数据集结构" in soul_text
-        assert "目标：先确定方案和数据结构" in soul_text
+        assert "项目最终目标：形成可复查的规则编排微调方案" in soul_text
+        assert "项目今日目标：先确定方案和数据结构" in soul_text
         assert "## 用户偏好" in soul_text
 
 
@@ -684,6 +688,13 @@ def test_fallback_create_project_defaults_to_p2_without_priority() -> None:
         assert result["status"] == "applied"
         assert result["project"]["priority"] == "P2"
         assert result["project"]["name"] == "整理一个规则评估数据集"
+        connection = initialize_database(db_path)
+        try:
+            project = repo.get_project_by_name(connection, "整理一个规则评估数据集")
+        finally:
+            connection.close()
+        assert repo.project_target_goal(project) == "先写数据结构草案"
+        assert repo.project_today_goal(project) == "先写数据结构草案"
 
 
 def test_invalid_model_output_does_not_mutate_data() -> None:

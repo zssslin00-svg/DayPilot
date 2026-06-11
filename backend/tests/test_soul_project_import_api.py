@@ -75,8 +75,8 @@ def _write_soul(path: Path, current_projects: str | None = None) -> None:
                 current_projects
                 or "\n".join(
                     [
-                        "1. P0 Alpha 项目：当前进度：新的 Alpha 进度。目标：确认 Alpha 最小闭环。",
-                        "2. P1 Beta 项目：当前进度：刚开始。目标：写出 Beta 方案。",
+                        "1. P0 Alpha 项目：当前进度：新的 Alpha 进度。项目最终目标：确认 Alpha 最小闭环。项目今日目标：整理 Alpha 验收清单。",
+                        "2. P1 Beta 项目：当前进度：刚开始。项目最终目标：写出 Beta 方案。项目今日目标：写出 Beta 第一版结构。",
                     ]
                 ),
                 "",
@@ -143,6 +143,9 @@ def test_soul_project_import_api_updates_projects_and_today_goal() -> None:
         assert today["is_workday"] is True
         assert today["active_project_count"] == 2
         assert len(today["goals"]) == 2
+        soul_text = soul_path.read_text(encoding="utf-8")
+        assert "项目最终目标：确认 Alpha 最小闭环" in soul_text
+        assert "项目今日目标：" in soul_text
 
 
 def test_today_goal_auto_imports_soul_projects_before_generation() -> None:
@@ -168,7 +171,7 @@ def test_regenerate_today_goal_imports_latest_soul_first() -> None:
         soul_path = root / "SOUL.md"
         _write_soul(
             soul_path,
-            "1. P0 Alpha 项目：当前进度：旧进度。目标：确认 Alpha 最小闭环。",
+            "1. P0 Alpha 项目：当前进度：旧进度。项目最终目标：确认 Alpha 最小闭环。项目今日目标：整理 Alpha 验收清单。",
         )
 
         status, first_today = _request(db_path, soul_path, "GET", "/api/today-goal")
@@ -179,8 +182,8 @@ def test_regenerate_today_goal_imports_latest_soul_first() -> None:
             soul_path,
             "\n".join(
                 [
-                    "1. P0 Alpha 项目：当前进度：新的 Alpha 进度。目标：确认 Alpha 最小闭环。",
-                    "2. P1 Beta 项目：当前进度：刚开始。目标：写出 Beta 方案。",
+                    "1. P0 Alpha 项目：当前进度：新的 Alpha 进度。项目最终目标：确认 Alpha 最小闭环。项目今日目标：整理 Alpha 验收清单。",
+                    "2. P1 Beta 项目：当前进度：刚开始。项目最终目标：写出 Beta 方案。项目今日目标：写出 Beta 第一版结构。",
                 ]
             ),
         )

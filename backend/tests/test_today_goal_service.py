@@ -27,7 +27,10 @@ def _seed_project(connection, *, project_id: int, name: str) -> None:
         status="active",
         status_summary=f"{name} summary.",
         planning_bias=f"{name} planning.",
-        source_payload={},
+        source_payload={
+            "target_goal": f"{name} final goal.",
+            "today_goal": f"{name} today constraint.",
+        },
     )
 
 
@@ -108,9 +111,25 @@ def test_refresh_today_goal_for_project_keeps_or_refreshes_only_target_project()
         finally:
             connection.close()
         assert active_goal["active_version"]["revision_source"] == "system_regeneration"
-        assert active_goal["daily_goal"]["context_snapshot"]["project_state_hash"] == repo.project_state_hash(
-            active_goal["project"]
+        assert "Project Alpha today constraint." in active_goal["active_version"]["main_goal"]
+        assert active_goal["daily_goal"]["context_snapshot"]["project_today_goal"] == "Project Alpha today constraint."
+        assert repo.project_today_goal(active_goal["project"]) == active_goal["active_version"]["main_goal"]
+
+        refreshed_again = refresh_today_goal_for_project(
+            db_path,
+            date(2026, 6, 9),
+            1,
+            force=True,
+            revision_reason="refresh target project goal again",
         )
+        assert refreshed_again.status == "refreshed"
+        connection = initialize_database(db_path)
+        try:
+            assert _version_count(connection, project_id=1, goal_date="2026-06-09") == 3
+            active_goal = repo.get_goal_with_active_version_by_date_and_project(connection, "2026-06-09", 1)
+        finally:
+            connection.close()
+        assert active_goal["active_version"]["main_goal"].count("围绕「Project Alpha」交付：") == 1
 
 
 def test_refresh_today_goal_for_project_skips_non_workday() -> None:

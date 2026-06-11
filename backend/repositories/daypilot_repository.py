@@ -384,6 +384,7 @@ def normalize_project_state(value: Any, **overrides: Any) -> dict[str, Any]:
         state.get("planning_guidance", state.get("planning_bias")),
     )
     target_goal = overrides.get("target_goal", state.get("target_goal"))
+    today_goal = overrides.get("today_goal", state.get("today_goal"))
     facts = overrides.get("facts", state.get("facts"))
     updated_from = overrides.get("updated_from", state.get("updated_from"))
     return {
@@ -391,6 +392,7 @@ def normalize_project_state(value: Any, **overrides: Any) -> dict[str, Any]:
         "summary": str(summary or "").strip(),
         "planning_guidance": str(planning_guidance or "").strip(),
         "target_goal": str(target_goal or "").strip(),
+        "today_goal": str(today_goal or "").strip(),
         "facts": _normalize_project_facts(facts),
         "updated_from": updated_from if isinstance(updated_from, dict) else {},
     }
@@ -407,11 +409,13 @@ def project_state_from_legacy(
     payload = _decode_json_mapping(source_payload)
     state = normalize_project_state(existing_state)
     target_goal = payload.get("target_goal", state.get("target_goal"))
+    today_goal = payload.get("today_goal", state.get("today_goal"))
     state = normalize_project_state(
         state,
         summary=status_summary if status_summary is not None else state.get("summary"),
         planning_guidance=planning_bias if planning_bias is not None else state.get("planning_guidance"),
         target_goal=target_goal,
+        today_goal=today_goal,
         updated_from=updated_from
         or {
             "source": "legacy_project_fields",
@@ -444,7 +448,7 @@ def merge_project_state(
                 and str(fact.get("source_id") or "") == str(source_id)
             )
         ]
-    for key in ("summary", "planning_guidance", "target_goal"):
+    for key in ("summary", "planning_guidance", "target_goal", "today_goal"):
         if key in patch_data:
             state[key] = str(patch_data.get(key) or "").strip()
     facts = _normalize_project_facts(patch_data.get("facts"))
@@ -478,6 +482,12 @@ def project_target_goal(project: Mapping[str, Any] | None) -> str:
     if project is None:
         return ""
     return normalize_project_state(project.get("project_state")).get("target_goal", "")
+
+
+def project_today_goal(project: Mapping[str, Any] | None) -> str:
+    if project is None:
+        return ""
+    return normalize_project_state(project.get("project_state")).get("today_goal", "")
 
 
 def project_state_hash(project_or_state: Mapping[str, Any] | None) -> str:
@@ -1650,12 +1660,15 @@ def _materialize_project_record(record: Record) -> Record:
     record["project_state"] = state
     record["status_summary"] = state["summary"]
     record["planning_bias"] = state["planning_guidance"]
+    record["target_goal"] = state["target_goal"]
+    record["today_goal"] = state["today_goal"]
     updated_from = state.get("updated_from") if isinstance(state.get("updated_from"), dict) else {}
     record["source_payload"] = {
         "project_state": state,
         "progress": state["summary"],
         "planning_bias": state["planning_guidance"],
         "target_goal": state["target_goal"],
+        "today_goal": state["today_goal"],
         "name": record.get("name") or "",
         "source": updated_from.get("source") or "derived_project_state",
     }

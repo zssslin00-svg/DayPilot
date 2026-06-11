@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -9,14 +10,18 @@ from typing import Any
 
 from backend.repositories import daypilot_repository as repo
 from backend.repositories.database import DEFAULT_DB_PATH, initialize_database
+from backend.services.llm_client import generate_json_with_fallback
 from backend.services.project_lifecycle_service import apply_project_lifecycle_output
 from backend.services.soul_context import SOUL_PATH
 
 
 SECTION_TITLE = "## 当前项目"
+PROMPT_VERSION_MOCK = "soul_project_import_v2_mock"
+PROMPT_VERSION_DEEPSEEK = "soul_project_import_v2_deepseek"
+MOCK_MODEL_NAME = "mock-soul-project-parser"
 NEXT_SECTION_PATTERN = re.compile(r"^##\s+", flags=re.MULTILINE)
 LIST_ITEM_PATTERN = re.compile(r"^\s*(?:[-*+]|(?:\d+)[.)、])\s+(.+?)\s*$")
-STOP_LINES = ("每日生成规则", "项目的当前进度")
+STOP_LINES = ("本段落由 DayPilot 管理", "每日生成规则", "项目的当前进度")
 EMPTY_PROJECT_MARKERS = ("暂无 active 项目", "暂无当前项目", "当前 active 项目有 0 个")
 PRIORITY_VALUES = {"P0", "P1", "P2"}
 
@@ -33,6 +38,7 @@ class SoulProjectEntry:
     priority: str | None
     status_summary: str
     target_goal: str
+    today_goal: str
     planning_bias: str
     raw_text: str
 
@@ -49,8 +55,11 @@ def import_current_projects_from_soul(
 ) -> SoulProjectImportResult:
     path = Path(soul_path)
     section_text = _extract_current_projects_section(path)
-    entries = _parse_project_entries(section_text)
+    project_parse_text = _project_parse_region(section_text)
+    entries = _parse_project_entries(project_parse_text)
     declares_no_active_projects = _section_declares_no_active_projects(section_text)
+    if not entries and not declares_no_active_projects:
+        entries = _parse_project_entries_with_llm(project_parse_text, soul_path=path)
     if not entries and not declares_no_active_projects:
         raise SoulProjectImportError("SOUL.md 当前项目段落没有可识别的项目列表。")
 
@@ -177,6 +186,18 @@ def _read_current_section_if_possible(soul_path: Path, *, fallback: str) -> str:
         return fallback
 
 
+def _project_parse_region(section_text: str) -> str:
+    lines: list[str] = []
+    for line in section_text.splitlines():
+        stripped = line.strip()
+        if stripped == SECTION_TITLE:
+            continue
+        if any(stripped.startswith(marker) for marker in STOP_LINES):
+            break
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
 def _parse_project_entries(section_text: str) -> list[SoulProjectEntry]:
     entries: list[SoulProjectEntry] = []
     for line in section_text.splitlines():
@@ -186,13 +207,198 @@ def _parse_project_entries(section_text: str) -> list[SoulProjectEntry]:
         if any(stripped.startswith(marker) for marker in STOP_LINES):
             break
         match = LIST_ITEM_PATTERN.match(stripped)
-        if match is None:
+        if match is not None:
+            raw_text = match.group(1).strip()
+        elif _looks_like_project_entry_line(stripped):
+            raw_text = stripped
+        else:
             continue
-        raw_text = match.group(1).strip()
         if _looks_like_generation_rule(raw_text):
             continue
         entry = _parse_project_entry(raw_text, position=len(entries) + 1)
         if entry is not None:
+            entries.append(entry)
+    return entries
+
+
+def _looks_like_project_entry_line(text: str) -> bool:
+    if re.match(r"^\s*P[012]\b", text, flags=re.IGNORECASE):
+        return True
+    if re.match(r"^\s*(?:项目|当前项目)\s*[:：]", text):
+        return True
+    return False
+
+
+def _parse_project_entries_with_llm(section_text: str, *, soul_path: Path) -> list[SoulProjectEntry]:
+    try:
+        llm_result = generate_json_with_fallback(
+            task_name="soul_project_import_parse",
+            prompt_version_deepseek=PROMPT_VERSION_DEEPSEEK,
+            prompt_version_mock=PROMPT_VERSION_MOCK,
+            mock_model_name=MOCK_MODEL_NAME,
+            build_messages=lambda _soul: _soul_project_parse_messages(section_text),
+            mock_generate=lambda: _mock_soul_project_parse(section_text),
+            normalizer=_normalize_soul_project_parse_output,
+            validator=_validate_soul_project_parse_output,
+            soul_path=soul_path,
+        )
+    except Exception:
+        return []
+    return _entries_from_llm_output(llm_result.output)
+
+
+def _soul_project_parse_messages(section_text: str) -> list[dict[str, str]]:
+    payload = {
+        "task": "Parse the SOUL.md current-project section into fixed DayPilot active project records.",
+        "required_json_shape": {
+            "projects": [
+                {
+                    "name": "project name",
+                    "priority": "P0|P1|P2|null",
+                    "status_summary": "current progress/status, empty if unstated",
+                    "target_goal": "project final goal, empty if unstated",
+                    "today_goal": "project today goal, empty if unstated",
+                }
+            ]
+        },
+        "rules": [
+            "Return only active projects explicitly present in the section.",
+            "Ignore instructions, generation rules, explanatory text, and empty-project markers.",
+            "Map 项目最终目标, 最终目标, 长期目标 to target_goal.",
+            "Map 项目今日目标, 今日目标, 今天目标 to today_goal.",
+            "For legacy 目标 without a clearer final/today label, put the same value in both target_goal and today_goal.",
+            "Do not invent missing projects or goals.",
+        ],
+        "section_text": section_text,
+    }
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You parse DayPilot SOUL.md project text. Return exactly one valid JSON object. "
+                "Do not include Markdown fences or prose."
+            ),
+        },
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False, default=str)},
+    ]
+
+
+def _mock_soul_project_parse(section_text: str) -> dict[str, Any]:
+    projects: list[dict[str, Any]] = []
+    pattern = re.compile(
+        r"(?P<priority>P[012])\s*(?P<body>.*?)(?=(?:\n|\r|\s)P[012]\b|$)",
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    for match in pattern.finditer(section_text):
+        raw = f"{match.group('priority')} {match.group('body')}".strip()
+        entry = _parse_project_entry(_compact_text(raw, 600), position=len(projects) + 1)
+        if entry is None:
+            continue
+        projects.append(
+            {
+                "name": entry.name,
+                "priority": entry.priority,
+                "status_summary": entry.status_summary,
+                "target_goal": entry.target_goal,
+                "today_goal": entry.today_goal,
+            }
+        )
+    if projects:
+        return {"projects": projects}
+
+    prose_pattern = re.compile(
+        r"(?P<name>[\w A-Za-z0-9_\-\u4e00-\u9fff]{2,80}?项目)\s*(?P<body>.*?)(?=(?:[\n。；]\s*[\w A-Za-z0-9_\-\u4e00-\u9fff]{2,80}?项目)|$)",
+        flags=re.DOTALL,
+    )
+    for match in prose_pattern.finditer(section_text):
+        name = _clean_prose_project_name(match.group("name"))
+        if not name or name in {"当前项目", "active 项目"}:
+            continue
+        raw = f"{name}：{match.group('body').strip()}"
+        entry = _parse_project_entry(_compact_text(raw, 600), position=len(projects) + 1)
+        if entry is None:
+            continue
+        projects.append(
+            {
+                "name": entry.name,
+                "priority": entry.priority,
+                "status_summary": entry.status_summary,
+                "target_goal": entry.target_goal,
+                "today_goal": entry.today_goal,
+            }
+        )
+    return {"projects": projects}
+
+
+def _clean_prose_project_name(text: str) -> str:
+    name = re.sub(r"^.*(?:推进|跟踪|维护|处理|做)\s*", "", str(text or "").strip())
+    return _clean_project_name(name)
+
+
+def _normalize_soul_project_parse_output(output: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(output, dict):
+        raise ValueError("soul_project_parse_output_not_object")
+    raw_projects = output.get("projects")
+    if not isinstance(raw_projects, list):
+        raise ValueError("soul_project_parse_projects_not_array")
+    projects: list[dict[str, Any]] = []
+    for item in raw_projects:
+        if not isinstance(item, dict):
+            raise ValueError("soul_project_parse_project_not_object")
+        priority = _normalize_priority(item.get("priority"))
+        target_goal = _compact_text(item.get("target_goal"), 240)
+        today_goal = _compact_text(item.get("today_goal"), 240)
+        legacy_goal = _compact_text(item.get("goal"), 240)
+        if legacy_goal and not target_goal and not today_goal:
+            target_goal = legacy_goal
+            today_goal = legacy_goal
+        projects.append(
+            {
+                "name": _clean_project_name(str(item.get("name") or "")),
+                "priority": priority,
+                "status_summary": _compact_text(item.get("status_summary") or item.get("progress"), 240),
+                "target_goal": target_goal,
+                "today_goal": today_goal,
+            }
+        )
+    return {"projects": projects}
+
+
+def _validate_soul_project_parse_output(output: dict[str, Any]) -> None:
+    projects = output.get("projects")
+    if not isinstance(projects, list):
+        raise ValueError("missing_projects")
+    seen: set[str] = set()
+    for item in projects:
+        if not isinstance(item, dict):
+            raise ValueError("project_not_object")
+        name = str(item.get("name") or "").strip()
+        if not name:
+            raise ValueError("missing_project_name")
+        key = _name_key(name)
+        if key in seen:
+            raise ValueError("duplicate_project_name")
+        seen.add(key)
+
+
+def _entries_from_llm_output(output: dict[str, Any]) -> list[SoulProjectEntry]:
+    entries: list[SoulProjectEntry] = []
+    for item in output.get("projects") or []:
+        if not isinstance(item, dict):
+            continue
+        entry = SoulProjectEntry(
+            position=len(entries) + 1,
+            name=str(item.get("name") or "").strip(),
+            priority=_normalize_priority(item.get("priority")),
+            status_summary=_compact_text(item.get("status_summary"), 240),
+            target_goal=_compact_text(item.get("target_goal"), 240),
+            today_goal=_compact_text(item.get("today_goal"), 240),
+            planning_bias=_planning_bias_from_target(
+                _compact_text(item.get("target_goal"), 240) or _compact_text(item.get("today_goal"), 240)
+            ),
+            raw_text=f"llm_parse:{item}",
+        )
+        if entry.name:
             entries.append(entry)
     return entries
 
@@ -207,16 +413,17 @@ def _parse_project_entry(raw_text: str, *, position: int) -> SoulProjectEntry | 
         return None
 
     status_summary = _field_segment(details, ["当前进度", "进度", "阶段", "最近阻塞"]) or ""
-    target_goal = _field_segment(details, ["目标", "本周目标", "希望推进到"]) or ""
+    target_goal, today_goal = _extract_project_goals(details)
     if not status_summary and details and not _starts_with_target_label(details):
         status_summary = _compact_text(details, 240)
-    planning_bias = _planning_bias_from_target(target_goal) if target_goal else ""
+    planning_bias = _planning_bias_from_target(target_goal or today_goal) if today_goal or target_goal else ""
     return SoulProjectEntry(
         position=position,
         name=name,
         priority=priority,
         status_summary=status_summary,
         target_goal=target_goal,
+        today_goal=today_goal,
         planning_bias=planning_bias,
         raw_text=raw_text,
     )
@@ -238,7 +445,19 @@ def _split_name_and_details(text: str) -> tuple[str, str]:
 def _first_detail_label_index(text: str) -> int:
     indices = [
         index
-        for label in ["当前进度", "进度", "阶段", "最近阻塞", "目标", "本周目标", "希望推进到"]
+        for label in [
+            "当前进度",
+            "进度",
+            "阶段",
+            "最近阻塞",
+            "项目最终目标",
+            "最终目标",
+            "项目今日目标",
+            "今日目标",
+            "目标",
+            "本周目标",
+            "希望推进到",
+        ]
         for index in [text.find(label)]
         if index >= 0
     ]
@@ -254,8 +473,21 @@ def _field_segment(text: str, labels: list[str]) -> str | None:
     for label in labels:
         match = re.search(rf"{re.escape(label)}\s*(?:[:：]|是)?\s*(.+)", text, flags=re.DOTALL)
         if match:
-            return _first_segment(match.group(1), ["。", "；", "\n"])
+            return _first_segment(match.group(1), _field_value_stops())
     return None
+
+
+def _field_value_stops() -> list[str]:
+    return ["。", "；", "\n", "项目最终目标", "最终目标", "项目今日目标", "今日目标"]
+
+
+def _extract_project_goals(text: str) -> tuple[str, str]:
+    target_goal = _field_segment(text, ["项目最终目标", "最终目标"])
+    today_goal = _field_segment(text, ["项目今日目标", "今日目标"])
+    if not target_goal and not today_goal:
+        legacy_goal = _field_segment(text, ["目标", "本周目标", "希望推进到"]) or ""
+        return legacy_goal, legacy_goal
+    return target_goal or "", today_goal or ""
 
 
 def _first_segment(text: str, stops: list[str]) -> str:
@@ -271,7 +503,11 @@ def _extract_priority(text: str) -> str | None:
     match = re.search(r"(?:^|[\s\[（(【])(?P<priority>P[012])(?:$|[\s\]）)】:：、-])", text, flags=re.IGNORECASE)
     if match is None:
         return None
-    priority = match.group("priority").upper()
+    return _normalize_priority(match.group("priority"))
+
+
+def _normalize_priority(value: Any) -> str | None:
+    priority = str(value or "").strip().upper()
     return priority if priority in PRIORITY_VALUES else None
 
 
@@ -292,7 +528,10 @@ def _compact_text(text: Any, limit: int) -> str:
 
 def _starts_with_target_label(text: str) -> bool:
     stripped = text.strip()
-    return any(stripped.startswith(label) for label in ("目标", "本周目标", "希望推进到"))
+    return any(
+        stripped.startswith(label)
+        for label in ("项目最终目标", "最终目标", "项目今日目标", "今日目标", "目标", "本周目标", "希望推进到")
+    )
 
 
 def _looks_like_generation_rule(text: str) -> bool:
@@ -418,6 +657,8 @@ def _entry_changes_project(entry: SoulProjectEntry, project: dict[str, Any]) -> 
         return True
     if entry.target_goal and entry.target_goal != repo.project_target_goal(project):
         return True
+    if entry.today_goal and entry.today_goal != repo.project_today_goal(project):
+        return True
     if entry.planning_bias and entry.planning_bias != str(project.get("planning_bias") or ""):
         return True
     return False
@@ -433,6 +674,7 @@ def _create_item(entry: SoulProjectEntry) -> dict[str, Any]:
         "status_summary": entry.status_summary,
         "planning_bias": entry.planning_bias,
         "target_goal": entry.target_goal,
+        "today_goal": entry.today_goal,
         "project_state_patch": _project_state_patch(entry),
         "completion_summary": "",
         "today_goal_policy": "create",
@@ -443,6 +685,7 @@ def _create_item(entry: SoulProjectEntry) -> dict[str, Any]:
 
 def _update_item(entry: SoulProjectEntry, project: dict[str, Any], *, renamed: bool) -> dict[str, Any]:
     target_goal = entry.target_goal or repo.project_target_goal(project)
+    today_goal = entry.today_goal or repo.project_today_goal(project)
     planning_bias = entry.planning_bias or str(project.get("planning_bias") or "")
     return {
         "action": "update_project",
@@ -452,6 +695,7 @@ def _update_item(entry: SoulProjectEntry, project: dict[str, Any], *, renamed: b
         "status_summary": entry.status_summary or str(project.get("status_summary") or ""),
         "planning_bias": planning_bias,
         "target_goal": target_goal,
+        "today_goal": today_goal,
         "project_state_patch": _project_state_patch(entry, fallback_project=project),
         "completion_summary": "",
         "today_goal_policy": "refresh",
@@ -469,6 +713,7 @@ def _complete_item(project: dict[str, Any]) -> dict[str, Any]:
         "status_summary": str(project.get("status_summary") or ""),
         "planning_bias": str(project.get("planning_bias") or ""),
         "target_goal": repo.project_target_goal(project),
+        "today_goal": repo.project_today_goal(project),
         "project_state_patch": {},
         "completion_summary": "从 SOUL.md 当前项目列表移除，标记为完成。",
         "today_goal_policy": "remove",
@@ -487,6 +732,7 @@ def _project_state_patch(
         "planning_guidance": entry.planning_bias
         or (str(fallback_project.get("planning_bias") or "") if fallback_project else ""),
         "target_goal": entry.target_goal or (repo.project_target_goal(fallback_project) if fallback_project else ""),
+        "today_goal": entry.today_goal or (repo.project_today_goal(fallback_project) if fallback_project else ""),
         "facts": [],
         "updated_from": {
             "source": "soul_project_import",

@@ -115,7 +115,7 @@ def test_project_lifecycle_api_lists_creates_and_completes_projects() -> None:
             "POST",
             "/api/projects/lifecycle",
             {
-                "message": "新增 P0 项目：微调一个编排规则的模型。当前进度：还没确定实现方案。目标：先确定方案。",
+                "message": "新增 P0 项目：微调一个编排规则的模型。当前进度：还没确定实现方案。项目最终目标：形成可复查的规则编排微调方案。项目今日目标：先确定方案。",
             },
         )
         assert status == 200

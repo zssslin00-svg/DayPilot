@@ -195,7 +195,11 @@ class DayPilotHandler(BaseHTTPRequestHandler):
 
         soul_project_import = self._import_soul_projects_for_today(today)
         try:
-            result = get_or_generate_today_goal(self.server.db_path, today)
+            result = get_or_generate_today_goal(
+                self.server.db_path,
+                today,
+                soul_path=self.server.soul_path,
+            )
         except DailyGoalGenerationError as exc:
             self._send_json(500, {"error": "goal_generation_failed", "detail": str(exc)})
             return
@@ -235,7 +239,11 @@ class DayPilotHandler(BaseHTTPRequestHandler):
 
         soul_project_import = self._import_soul_projects_for_today(today)
         try:
-            result = regenerate_today_goal(self.server.db_path, today)
+            result = regenerate_today_goal(
+                self.server.db_path,
+                today,
+                soul_path=self.server.soul_path,
+            )
         except DailyGoalGenerationError as exc:
             self._send_json(500, {"error": "goal_regeneration_failed", "detail": str(exc)})
             return

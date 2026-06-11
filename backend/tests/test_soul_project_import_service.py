@@ -90,8 +90,8 @@ def test_soul_project_import_adds_updates_renames_completes_and_is_idempotent() 
         _write_soul(
             soul_path,
             """
-1. P0 Alpha 项目：当前进度：新的 Alpha 进度。目标：确认 Alpha 最小闭环。
-2. P1 Beta 项目：当前进度：刚开始。目标：写出 Beta 方案。
+1. P0 Alpha 项目：当前进度：新的 Alpha 进度。项目最终目标：确认 Alpha 最小闭环。项目今日目标：整理 Alpha 验收清单。
+2. P1 Beta 项目：当前进度：刚开始。项目最终目标：写出 Beta 方案。项目今日目标：写出 Beta 第一版结构。
 """,
         )
         first = import_current_projects_from_soul(db_path, soul_path=soul_path, today=WORKDAY).payload
@@ -113,9 +113,11 @@ def test_soul_project_import_adds_updates_renames_completes_and_is_idempotent() 
 
         assert alpha["status_summary"] == "新的 Alpha 进度"
         assert repo.project_target_goal(alpha) == "确认 Alpha 最小闭环"
+        assert "整理 Alpha 验收清单" in repo.project_today_goal(alpha)
         assert beta is not None
         assert beta["priority"] == "P1"
         assert repo.project_target_goal(beta) == "写出 Beta 方案"
+        assert "写出 Beta 第一版结构" in repo.project_today_goal(beta)
         assert len(goals) == 2
 
         repeated = import_current_projects_from_soul(db_path, soul_path=soul_path, today=WORKDAY).payload
@@ -125,7 +127,7 @@ def test_soul_project_import_adds_updates_renames_completes_and_is_idempotent() 
         _write_soul(
             soul_path,
             """
-1. P0 Alpha 改名后项目：当前进度：新的 Alpha 进度。目标：确认 Alpha 最小闭环。
+1. P0 Alpha 改名后项目：当前进度：新的 Alpha 进度。项目最终目标：确认 Alpha 最小闭环。项目今日目标：整理 Alpha 验收清单。
 2. P1 Beta 项目。
 """,
         )
@@ -191,9 +193,84 @@ def test_soul_project_import_no_active_projects_clears_profile_projects() -> Non
         assert profile["goal_preferences"]["project_priorities"] == []
 
 
+def test_soul_project_import_legacy_goal_backfills_final_and_today_goal() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        db_path = root / "soul-import-legacy.sqlite3"
+        soul_path = root / "SOUL.md"
+
+        _write_soul(
+            soul_path,
+            "1. P0 Legacy 项目：当前进度：只有旧格式。目标：确认旧格式仍能导入。",
+        )
+        result = import_current_projects_from_soul(db_path, soul_path=soul_path, today=WORKDAY).payload
+
+        assert result["status"] == "applied"
+        connection = initialize_database(db_path)
+        try:
+            project = repo.get_project_by_name(connection, "Legacy 项目")
+        finally:
+            connection.close()
+
+        assert project is not None
+        assert repo.project_target_goal(project) == "确认旧格式仍能导入"
+        assert "确认旧格式仍能导入" in repo.project_today_goal(project)
+
+
+def test_soul_project_import_accepts_non_list_priority_lines() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        db_path = root / "soul-import-loose.sqlite3"
+        soul_path = root / "SOUL.md"
+
+        _write_soul(
+            soul_path,
+            "P0 Loose 项目 当前进度：还在整理。最终目标：形成固定导入格式。今日目标：跑通非列表导入。",
+        )
+        result = import_current_projects_from_soul(db_path, soul_path=soul_path, today=WORKDAY).payload
+
+        assert result["status"] == "applied"
+        connection = initialize_database(db_path)
+        try:
+            project = repo.get_project_by_name(connection, "Loose 项目")
+        finally:
+            connection.close()
+
+        assert project is not None
+        assert repo.project_target_goal(project) == "形成固定导入格式"
+        assert "跑通非列表导入" in repo.project_today_goal(project)
+
+
+def test_soul_project_import_llm_fallback_parses_prose_section() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        db_path = root / "soul-import-prose.sqlite3"
+        soul_path = root / "SOUL.md"
+
+        _write_soul(
+            soul_path,
+            "我现在主要推进 Gamma 项目，当前进度是刚完成调研，最终目标是形成可复用导入器，今日目标是整理解析样例。",
+        )
+        result = import_current_projects_from_soul(db_path, soul_path=soul_path, today=WORKDAY).payload
+
+        assert result["status"] == "applied"
+        connection = initialize_database(db_path)
+        try:
+            project = repo.get_project_by_name(connection, "Gamma 项目")
+        finally:
+            connection.close()
+
+        assert project is not None
+        assert repo.project_target_goal(project) == "形成可复用导入器"
+        assert "整理解析样例" in repo.project_today_goal(project)
+
+
 def main() -> None:
     test_soul_project_import_adds_updates_renames_completes_and_is_idempotent()
     test_soul_project_import_no_active_projects_clears_profile_projects()
+    test_soul_project_import_legacy_goal_backfills_final_and_today_goal()
+    test_soul_project_import_accepts_non_list_priority_lines()
+    test_soul_project_import_llm_fallback_parses_prose_section()
     print("PASS: SOUL.md current project import adds, updates, renames, completes, and stays idempotent")
 
 

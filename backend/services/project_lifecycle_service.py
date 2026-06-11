@@ -232,11 +232,13 @@ Do not invent completion or project details that the message does not support.
                     "priority": "P0|P1|P2|null",
                     "status_summary": "current status/progress summary, empty if not stated",
                     "planning_bias": "planning guidance, empty if not stated",
-                    "target_goal": "explicit target goal, empty if not stated",
+                    "target_goal": "project final goal, empty if not stated",
+                    "today_goal": "project today goal constraint, empty if not stated",
                     "project_state_patch": {
                         "summary": "current status/progress summary, empty if not stated",
                         "planning_guidance": "planning guidance, empty if not stated",
-                        "target_goal": "explicit target goal, empty if not stated",
+                        "target_goal": "project final goal, empty if not stated",
+                        "today_goal": "project today goal constraint, empty if not stated",
                         "facts": [
                             {
                                 "type": "progress|decision|constraint|next_step|artifact|risk|open_question|context",
@@ -264,8 +266,10 @@ Do not invent completion or project details that the message does not support.
             "For create_project, default priority to P2 unless the user says P0, P1, or P2.",
             "For complete_project, update_project, or delete_project, choose an existing project_id when possible.",
             "Set today_goal_policy to create for new projects, remove for completed/deleted projects, refresh for project name/progress/target/priority changes, and keep only for no current-state change.",
+            "Map 项目最终目标 to target_goal and 项目今日目标 to today_goal.",
+            "For legacy 目标 wording without 项目最终目标 or 项目今日目标, treat it as today_goal; if target_goal is otherwise empty, copy it to target_goal for compatibility.",
             "Use concise Chinese for status_summary and planning_bias.",
-            "Prefer project_state_patch as the canonical current project state update; status_summary/planning_bias/target_goal are backward-compatible mirrors.",
+            "Prefer project_state_patch as the canonical current project state update; status_summary/planning_bias/target_goal/today_goal are backward-compatible mirrors.",
         ],
         "message": context["message"],
         "active_projects": context["active_projects"],
@@ -303,6 +307,7 @@ def _normalize_lifecycle_output(output: dict[str, Any]) -> dict[str, Any]:
     status_summary = str(output.get("status_summary") or output.get("progress") or "").strip()
     planning_bias = str(output.get("planning_bias") or "").strip()
     target_goal = str(output.get("target_goal") or "").strip()
+    today_goal = str(output.get("today_goal") or "").strip()
     return {
         "action": action,
         "project_id": project_id,
@@ -312,11 +317,13 @@ def _normalize_lifecycle_output(output: dict[str, Any]) -> dict[str, Any]:
         "status_summary": status_summary,
         "planning_bias": planning_bias,
         "target_goal": target_goal,
+        "today_goal": today_goal,
         "project_state_patch": _normalize_project_state_patch(
             output.get("project_state_patch"),
             status_summary=status_summary,
             planning_bias=planning_bias,
             target_goal=target_goal,
+            today_goal=today_goal,
             completion_summary=str(output.get("completion_summary") or "").strip(),
             action=action,
         ),
@@ -398,7 +405,7 @@ def _apply_lifecycle_output(
                     error=soul_sync_error,
                 )
 
-        _apply_today_goal_refreshes(db_path, today, items)
+        _apply_today_goal_refreshes(db_path, today, items, soul_path=soul_path)
 
         return _batch_payload(
             items,
@@ -678,6 +685,7 @@ def _project_state_changed_for_goal(result: dict[str, Any]) -> bool:
         ("previous_planning_bias", "new_planning_bias"),
         ("previous_priority", "new_priority"),
         ("previous_target_goal", "new_target_goal"),
+        ("previous_today_goal", "new_today_goal"),
         ("previous_project_state_hash", "new_project_state_hash"),
     ]
     for previous_key, new_key in pairs:
@@ -702,6 +710,8 @@ def _apply_today_goal_refreshes(
     db_path: str | Path,
     today: date | None,
     items: list[dict[str, Any]],
+    *,
+    soul_path: Path,
 ) -> None:
     if today is None:
         for item in items:
@@ -726,6 +736,7 @@ def _apply_today_goal_refreshes(
                 int(project_id),
                 force=policy == "refresh",
                 revision_reason="Project lifecycle update refreshed this project goal.",
+                soul_path=soul_path,
             )
         except Exception as exc:  # noqa: BLE001 - goal refresh must not roll back project lifecycle writes
             item["today_goal_refresh"] = "failed"
@@ -745,15 +756,18 @@ def _apply_create_project(connection: sqlite3.Connection, output: dict[str, Any]
         previous_planning_bias = str(existing.get("planning_bias") or "")
         previous_priority = existing.get("priority") or "P2"
         previous_target_goal = _target_goal_from_project(existing)
+        previous_today_goal = _today_goal_from_project(existing)
         priority = output["priority"] if output.get("priority_explicit") else previous_priority
         next_summary = status_summary or previous_summary
         next_planning_bias = output["planning_bias"] or previous_planning_bias
         next_target_goal = output.get("target_goal") or previous_target_goal
+        next_today_goal = output.get("today_goal") or previous_today_goal
         source_output = {
             **output,
             "project_name": project_name,
             "priority": priority,
             "target_goal": next_target_goal,
+            "today_goal": next_today_goal,
         }
         updated = repo.update_project(
             connection,
@@ -784,6 +798,8 @@ def _apply_create_project(connection: sqlite3.Connection, output: dict[str, Any]
             "new_priority": priority,
             "previous_target_goal": previous_target_goal,
             "new_target_goal": next_target_goal,
+            "previous_today_goal": previous_today_goal,
+            "new_today_goal": next_today_goal,
             "previous_project_state_hash": repo.project_state_hash(existing),
             "new_project_state_hash": repo.project_state_hash(updated or existing),
             "planning_bias": next_planning_bias,
@@ -821,6 +837,8 @@ def _apply_create_project(connection: sqlite3.Connection, output: dict[str, Any]
         "new_priority": output["priority"],
         "previous_target_goal": None,
         "new_target_goal": output.get("target_goal") or "",
+        "previous_today_goal": None,
+        "new_today_goal": output.get("today_goal") or "",
         "previous_project_state_hash": None,
         "new_project_state_hash": repo.project_state_hash(project),
         "planning_bias": planning_bias,
@@ -867,11 +885,19 @@ def _apply_update_project(connection: sqlite3.Connection, output: dict[str, Any]
     previous_planning_bias = str(project.get("planning_bias") or "")
     previous_priority = project.get("priority") or "P2"
     previous_target_goal = _target_goal_from_project(project)
+    previous_today_goal = _today_goal_from_project(project)
     status_summary = output["status_summary"] or previous_summary
     planning_bias = output["planning_bias"] or previous_planning_bias
     priority = output["priority"] or previous_priority
     target_goal = output.get("target_goal") or previous_target_goal
-    source_output = {**output, "project_name": next_name, "priority": priority, "target_goal": target_goal}
+    today_goal = output.get("today_goal") or previous_today_goal
+    source_output = {
+        **output,
+        "project_name": next_name,
+        "priority": priority,
+        "target_goal": target_goal,
+        "today_goal": today_goal,
+    }
     updated = repo.update_project(
         connection,
         int(project["id"]),
@@ -902,6 +928,8 @@ def _apply_update_project(connection: sqlite3.Connection, output: dict[str, Any]
         "new_priority": priority,
         "previous_target_goal": previous_target_goal,
         "new_target_goal": target_goal,
+        "previous_today_goal": previous_today_goal,
+        "new_today_goal": today_goal,
         "previous_project_state_hash": repo.project_state_hash(project),
         "new_project_state_hash": repo.project_state_hash(updated or project),
         "planning_bias": planning_bias,
@@ -953,6 +981,8 @@ def _sync_user_profile_projects(connection: sqlite3.Connection) -> None:
             "name": project["name"],
             "progress": project.get("status_summary") or "",
             "planning_bias": project.get("planning_bias") or "",
+            "target_goal": repo.project_target_goal(project),
+            "today_goal": repo.project_today_goal(project),
             "id": project["id"],
         }
         for project in active_projects
@@ -1035,11 +1065,14 @@ def _render_current_project_line(index: int, project: dict[str, Any]) -> str:
     name = _soul_line_value(project.get("name"), limit=120)
     summary = _soul_line_value(project.get("status_summary"), limit=180)
     target = _soul_line_value(repo.project_target_goal(project), limit=160)
+    today_goal = _soul_line_value(repo.project_today_goal(project), limit=160)
     parts = [f"{priority} {name}"]
     if summary:
         parts.append(f"当前进度：{summary}")
     if target:
-        parts.append(f"目标：{target}")
+        parts.append(f"项目最终目标：{target}")
+    if today_goal:
+        parts.append(f"项目今日目标：{today_goal}")
     return f"{index}. {'；'.join(parts)}。"
 
 
@@ -1080,19 +1113,20 @@ def _fallback_create_output(message: str) -> dict[str, Any] | None:
         return None
     priority = _valid_priority(match.group(1))
     remainder = match.group(2).strip()
-    project_name = _first_segment(remainder, ["当前进度", "进度", "目标", "。", "\n"])
+    project_name = _first_segment(remainder, _project_detail_stops())
     if not project_name:
         return None
     progress = _field_segment(message, ["当前进度", "进度"]) or ""
-    target = _field_segment(message, ["目标"]) or ""
+    target, today_goal = _extract_project_goals(message)
     return {
         "action": "create_project",
         "project_id": None,
         "project_name": project_name,
         "priority": priority,
         "status_summary": progress,
-        "planning_bias": _planning_bias_from_target(target),
+        "planning_bias": _planning_bias_from_target(target or today_goal),
         "target_goal": target,
+        "today_goal": today_goal,
         "completion_summary": "",
         "confidence": 0.55,
         "reason": "mock fallback parsed an explicit create project message.",
@@ -1119,6 +1153,7 @@ def _fallback_delete_output(message: str, projects: list[dict[str, Any]]) -> dic
         "status_summary": str(project.get("status_summary") or ""),
         "planning_bias": str(project.get("planning_bias") or ""),
         "target_goal": "",
+        "today_goal": "",
         "completion_summary": "",
         "confidence": 0.6,
         "reason": "mock fallback matched an explicit delete project message.",
@@ -1139,6 +1174,7 @@ def _fallback_complete_output(message: str, projects: list[dict[str, Any]]) -> d
                 "status_summary": str(project.get("status_summary") or ""),
                 "planning_bias": str(project.get("planning_bias") or ""),
                 "target_goal": "",
+                "today_goal": "",
                 "completion_summary": _completion_summary(message, name),
                 "confidence": 0.55,
                 "reason": "mock fallback matched an existing project name and completion wording.",
@@ -1157,6 +1193,7 @@ def _fallback_complete_output(message: str, projects: list[dict[str, Any]]) -> d
                 "status_summary": str(project.get("status_summary") or ""),
                 "planning_bias": str(project.get("planning_bias") or ""),
                 "target_goal": "",
+                "today_goal": "",
                 "completion_summary": _completion_summary(message, name),
                 "confidence": 0.55,
                 "reason": "mock fallback parsed an explicit complete project message.",
@@ -1173,13 +1210,13 @@ def _fallback_update_output(message: str, projects: list[dict[str, Any]]) -> dic
     if rename_match:
         old_text = _first_segment(rename_match.group("old"), ["。", "；", "\n"])
         project = _project_mentioned_once(projects, old_text) or _project_mentioned_once(projects, message)
-        new_name = _first_segment(rename_match.group("new"), ["当前进度", "进度", "目标", "。", "；", "\n"])
+        new_name = _first_segment(rename_match.group("new"), _project_detail_stops() + ["；"])
         if project is not None and new_name:
             progress = _field_segment(message, ["当前进度", "进度"]) or str(project.get("status_summary") or "")
-            target = _field_segment(message, ["目标"]) or ""
+            target, today_goal = _extract_project_goals(message)
             planning_bias = (
-                _planning_bias_from_target(target)
-                if target
+                _planning_bias_from_target(target or today_goal)
+                if today_goal or target
                 else str(project.get("planning_bias") or _default_planning_bias_for_project(project))
             )
             return {
@@ -1190,6 +1227,7 @@ def _fallback_update_output(message: str, projects: list[dict[str, Any]]) -> dic
                 "status_summary": progress,
                 "planning_bias": planning_bias,
                 "target_goal": target,
+                "today_goal": today_goal,
                 "completion_summary": "",
                 "confidence": 0.65,
                 "reason": "mock fallback parsed a project rename/update message.",
@@ -1201,13 +1239,13 @@ def _fallback_update_output(message: str, projects: list[dict[str, Any]]) -> dic
     if project is None:
         return None
     progress = _field_segment(message, ["当前进度", "进度"])
-    target = _field_segment(message, ["目标"])
+    target, today_goal = _extract_project_goals(message)
     priority = _priority_from_message(message)
-    if not progress and not target and priority is None:
+    if not progress and not target and not today_goal and priority is None:
         return None
     planning_bias = (
-        _planning_bias_from_target(target)
-        if target
+        _planning_bias_from_target(target or today_goal)
+        if today_goal or target
         else str(project.get("planning_bias") or _default_planning_bias_for_project(project))
     )
     return {
@@ -1218,18 +1256,36 @@ def _fallback_update_output(message: str, projects: list[dict[str, Any]]) -> dic
         "status_summary": progress or str(project.get("status_summary") or ""),
         "planning_bias": planning_bias,
         "target_goal": target or "",
+        "today_goal": today_goal or "",
         "completion_summary": "",
         "confidence": 0.6,
         "reason": "mock fallback parsed a project progress update message.",
     }
 
 
+def _extract_project_goals(message: str) -> tuple[str, str]:
+    target_goal = _field_segment(message, ["项目最终目标", "最终目标"])
+    today_goal = _field_segment(message, ["项目今日目标", "今日目标"])
+    if not target_goal and not today_goal:
+        legacy_goal = _field_segment(message, ["目标", "本周目标", "希望推进到"]) or ""
+        return legacy_goal, legacy_goal
+    return target_goal or "", today_goal or ""
+
+
+def _project_detail_stops() -> list[str]:
+    return ["当前进度", "进度", "项目最终目标", "最终目标", "项目今日目标", "今日目标", "目标", "。", "\n"]
+
+
 def _field_segment(message: str, labels: list[str]) -> str | None:
     for label in labels:
         match = re.search(rf"{re.escape(label)}\s*(?:[:：]|是)\s*(.+)", message, flags=re.DOTALL)
         if match:
-            return _first_segment(match.group(1), ["。", "；", "\n"])
+            return _first_segment(match.group(1), _field_value_stops())
     return None
+
+
+def _field_value_stops() -> list[str]:
+    return ["。", "；", "\n", "项目最终目标", "最终目标", "项目今日目标", "今日目标"]
 
 
 def _first_segment(text: str, stops: list[str]) -> str:
@@ -1283,6 +1339,7 @@ def _source_payload(
             "progress": status_summary,
             "planning_bias": planning_bias,
             "target_goal": output.get("target_goal") or payload.get("target_goal") or "",
+            "today_goal": output.get("today_goal") or payload.get("today_goal") or "",
             "project_state_patch": output.get("project_state_patch") or payload.get("project_state_patch") or {},
         }
     )
@@ -1295,6 +1352,7 @@ def _normalize_project_state_patch(
     status_summary: str,
     planning_bias: str,
     target_goal: str,
+    today_goal: str,
     completion_summary: str,
     action: str,
 ) -> dict[str, Any]:
@@ -1307,6 +1365,8 @@ def _normalize_project_state_patch(
         patch["planning_guidance"] = planning_bias
     if target_goal and not str(patch.get("target_goal") or "").strip():
         patch["target_goal"] = target_goal
+    if today_goal and not str(patch.get("today_goal") or "").strip():
+        patch["today_goal"] = today_goal
     facts = patch.get("facts")
     if not isinstance(facts, list):
         facts = []
@@ -1328,6 +1388,10 @@ def _target_goal_from_project(project: dict[str, Any]) -> str:
     return repo.project_target_goal(project)
 
 
+def _today_goal_from_project(project: dict[str, Any]) -> str:
+    return repo.project_today_goal(project)
+
+
 def _project_payload(project: dict[str, Any] | None) -> dict[str, Any] | None:
     if project is None:
         return None
@@ -1339,6 +1403,8 @@ def _project_payload(project: dict[str, Any] | None) -> dict[str, Any] | None:
         "status": project["status"],
         "status_summary": project.get("status_summary") or "",
         "planning_bias": project.get("planning_bias") or "",
+        "target_goal": repo.project_target_goal(project),
+        "today_goal": repo.project_today_goal(project),
     }
 
 
@@ -1390,7 +1456,9 @@ def _planning_bias_from_target(target: str) -> str:
 
 
 def _default_planning_bias(output: dict[str, Any]) -> str:
-    return _planning_bias_from_target(output.get("target_goal") or output.get("status_summary") or output.get("project_name"))
+    return _planning_bias_from_target(
+        output.get("target_goal") or output.get("today_goal") or output.get("status_summary") or output.get("project_name")
+    )
 
 
 def _default_planning_bias_for_project(project: dict[str, Any]) -> str:

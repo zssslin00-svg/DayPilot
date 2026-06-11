@@ -390,6 +390,7 @@ def test_legacy_project_columns_migrate_to_project_state() -> None:
             assert project["status_summary"] == "Confirming ruleset orchestration design."
             assert project["planning_bias"] == "Prefer data structure and minimal validation tasks."
             assert project["project_state"]["target_goal"] == "Deliver flexible rule orchestration."
+            assert project["project_state"]["today_goal"] == ""
         finally:
             connection.close()
 

@@ -62,6 +62,11 @@ class MockDailyGoalLLMAdapter:
         goal_date = str(context["goal_date"])
         profile = context.get("user_profile") or {}
         project = context.get("project") or {}
+        project_goal_constraints = context.get("project_goal_constraints") or {}
+        project_today_goal = _compact_text(
+            project_goal_constraints.get("today_goal") or project.get("today_goal") or "",
+            80,
+        )
         ability_state = context.get("ability_state") or {}
         weekly_focus = context.get("weekly_focus") or []
         selected_focus = context.get("selected_weekly_focus")
@@ -95,7 +100,26 @@ class MockDailyGoalLLMAdapter:
             "不要同时扩展在线反馈修正和周报生成",
         ]
 
-        if selected_focus:
+        if project_today_goal:
+            project_name = str(project.get("name") or _first_project(profile) or "当前项目")
+            main_goal, project_today_goal = _project_today_goal_main_goal(project_name, project_today_goal)
+            primary_driver = "current_project_today_goal"
+            tomorrow_handling = "empty_agent_decided"
+            continuity_note = (
+                "优先使用 SOUL.md 当前项目里的项目今日目标，并将其整理成今天可验收的单一主目标。"
+            )
+            completion_criteria = [
+                _compact_text(f"完成“{project_today_goal}”对应的一个可检查交付物", 140),
+                "记录交付物位置、验证结果或后续限制",
+                "明确今天不扩展到项目最终目标的完整范围",
+            ]
+            minimum_result = _compact_text(f"至少留下“{project_today_goal}”的最小代码、文档、笔记或决策记录。", 220)
+            stretch_challenge = "完成最低切片后，补充一条验收记录或下一步边界。"
+            do_not_do = [
+                "不要把项目最终目标整体压成今天的任务",
+                "不要扩展到 SOUL 今日目标以外的方向",
+            ]
+        elif selected_focus:
             focus_text = _daily_focus_slice_text(selected_focus)
             main_goal = f"承接 weekly_focus，交付{focus_text}的今日最小切片"
             primary_driver = "last_week_focus"
@@ -158,8 +182,14 @@ class MockDailyGoalLLMAdapter:
         }
 
 
-def get_or_generate_today_goal(db_path: str | Path, today: date) -> TodayGoalResult:
+def get_or_generate_today_goal(
+    db_path: str | Path,
+    today: date,
+    *,
+    soul_path: str | Path | None = None,
+) -> TodayGoalResult:
     goal_date = today.isoformat()
+    sync_source_goal_id: int | None = None
     connection = initialize_database(db_path)
     try:
         with connection:
@@ -247,6 +277,14 @@ def get_or_generate_today_goal(db_path: str | Path, today: date) -> TodayGoalRes
                     prompt_version=context["llm_metadata"]["prompt_version"],
                 )
                 _mark_selected_focus_carried(connection, context, daily_goal_id, goal_output)
+                if update_project_today_goal_from_output(
+                    connection,
+                    project_id,
+                    goal_output,
+                    source="today_goal_generation",
+                    daily_goal_id=daily_goal_id,
+                ):
+                    sync_source_goal_id = sync_source_goal_id or daily_goal_id
 
                 generated = repo.get_goal_with_active_version_by_date_and_project(
                     connection,
@@ -257,6 +295,8 @@ def get_or_generate_today_goal(db_path: str | Path, today: date) -> TodayGoalRes
                     raise DailyGoalGenerationError("Generated goal was not persisted.")
                 goals.append(_attach_goal_output(generated))
 
+        if sync_source_goal_id is not None:
+            sync_current_projects_to_soul_if_requested(db_path, soul_path, sync_source_goal_id)
         return TodayGoalResult(
             goals=goals,
             created_count=created_count,
@@ -268,10 +308,16 @@ def get_or_generate_today_goal(db_path: str | Path, today: date) -> TodayGoalRes
         connection.close()
 
 
-def regenerate_today_goal(db_path: str | Path, today: date) -> TodayGoalResult:
+def regenerate_today_goal(
+    db_path: str | Path,
+    today: date,
+    *,
+    soul_path: str | Path | None = None,
+) -> TodayGoalResult:
     """Force a fresh daily goal version for every active project."""
 
     goal_date = today.isoformat()
+    sync_source_goal_id: int | None = None
     connection = initialize_database(db_path)
     try:
         with connection:
@@ -337,6 +383,14 @@ def regenerate_today_goal(db_path: str | Path, today: date) -> TodayGoalResult:
                     prompt_version=context["llm_metadata"]["prompt_version"],
                 )
                 _mark_selected_focus_carried(connection, context, daily_goal_id, goal_output)
+                if update_project_today_goal_from_output(
+                    connection,
+                    project_id,
+                    goal_output,
+                    source="today_goal_regeneration",
+                    daily_goal_id=daily_goal_id,
+                ):
+                    sync_source_goal_id = sync_source_goal_id or daily_goal_id
 
                 generated = repo.get_goal_with_active_version_by_date_and_project(
                     connection,
@@ -348,6 +402,8 @@ def regenerate_today_goal(db_path: str | Path, today: date) -> TodayGoalResult:
                 goals.append(_attach_goal_output(generated))
                 regenerated_count += 1
 
+        if sync_source_goal_id is not None:
+            sync_current_projects_to_soul_if_requested(db_path, soul_path, sync_source_goal_id)
         return TodayGoalResult(
             goals=goals,
             created_count=regenerated_count,
@@ -366,6 +422,7 @@ def refresh_today_goal_for_project(
     *,
     force: bool,
     revision_reason: str,
+    soul_path: str | Path | None = None,
 ) -> ProjectTodayGoalRefreshResult:
     """Generate or refresh today's goal for one active project only."""
 
@@ -444,6 +501,13 @@ def refresh_today_goal_for_project(
                 prompt_version=context["llm_metadata"]["prompt_version"],
             )
             _mark_selected_focus_carried(connection, context, daily_goal_id, goal_output)
+            should_sync_soul = update_project_today_goal_from_output(
+                connection,
+                int(project["id"]),
+                goal_output,
+                source="today_goal_project_refresh",
+                daily_goal_id=daily_goal_id,
+            )
 
             generated = repo.get_goal_with_active_version_by_date_and_project(
                 connection,
@@ -453,6 +517,8 @@ def refresh_today_goal_for_project(
             if generated is None or generated.get("active_version") is None:
                 raise DailyGoalGenerationError("Generated goal was not persisted.")
 
+        if should_sync_soul:
+            sync_current_projects_to_soul_if_requested(db_path, soul_path, daily_goal_id)
         return ProjectTodayGoalRefreshResult(
             status="refreshed" if had_active_goal else "created",
             goal=_attach_goal_output(generated),
@@ -489,6 +555,7 @@ The response must be valid json and must not include Markdown fences.
 Use concise Chinese for user-facing fields. Keep exactly one main goal for the current project.
 Do not choose between projects. The current project is already selected.
 Strictly follow the output_contract in the user message. In particular:
+- If context.project_goal_constraints.today_goal is non-empty, use it as the strongest project-level constraint and narrow it into one checkable daily goal.
 - growth_tags must be English lowercase slugs, never Chinese.
 - context_used must include primary_driver, tomorrow_direction_handling, continuity_note, and difficulty_reason.
 - context_used must not include extra keys such as project_priority or weekly_focus_alignment.
@@ -570,6 +637,10 @@ def _build_generation_context(
         "week_id": week_id,
         "user_profile": profile,
         "project": project,
+        "project_goal_constraints": {
+            "target_goal": repo.project_target_goal(project),
+            "today_goal": repo.project_today_goal(project),
+        },
         "projects": projects,
         "recent_daily_goals": recent_goals,
         "recent_project_goal_records": recent_project_goals,
@@ -621,6 +692,61 @@ def _ensure_daily_goal_record(
     )
 
 
+def update_project_today_goal_from_output(
+    connection: sqlite3.Connection,
+    project_id: int,
+    goal_output: dict[str, Any],
+    *,
+    source: str,
+    daily_goal_id: int,
+) -> bool:
+    today_goal = str(goal_output.get("main_goal") or "").strip()
+    if not today_goal:
+        return False
+    project = repo.get_project(connection, int(project_id))
+    if project is None:
+        return False
+    if repo.project_today_goal(project) == today_goal:
+        return False
+    next_state = repo.merge_project_state(
+        project.get("project_state"),
+        {"today_goal": today_goal},
+        updated_from={
+            "source": source,
+            "daily_goal_id": daily_goal_id,
+        },
+    )
+    repo.update_project(connection, int(project_id), project_state=next_state)
+    return True
+
+
+def sync_current_projects_to_soul_if_requested(
+    db_path: str | Path,
+    soul_path: str | Path | None,
+    source_daily_goal_id: int,
+) -> None:
+    if soul_path is None:
+        return
+    try:
+        from backend.services.project_lifecycle_service import sync_current_projects_to_soul
+
+        sync_current_projects_to_soul(db_path, soul_path=soul_path)
+    except Exception as exc:  # noqa: BLE001 - goal persistence is already complete
+        from backend.services.soul_sync_service import enqueue_soul_sync_retry
+
+        enqueue_soul_sync_retry(
+            db_path,
+            job_type="project_lifecycle",
+            source_table="daily_goals",
+            source_id=source_daily_goal_id,
+            payload={
+                "daily_goal_id": source_daily_goal_id,
+                "action": "sync_today_goal_to_soul",
+            },
+            error=_safe_error(exc),
+        )
+
+
 def _context_snapshot(context: dict[str, Any], goal_output: dict[str, Any]) -> dict[str, Any]:
     llm_metadata = context.get("llm_metadata") or {}
     return {
@@ -629,6 +755,8 @@ def _context_snapshot(context: dict[str, Any], goal_output: dict[str, Any]) -> d
         "ability_state_id": context["ability_state"]["id"],
         "project_id": context["project"]["id"],
         "project_name": context["project"]["name"],
+        "project_target_goal": repo.project_target_goal(context["project"]),
+        "project_today_goal": repo.project_today_goal(context["project"]),
         "project_state_hash": repo.project_state_hash(context["project"]),
         "recent_daily_goal_ids": [
             item["daily_goal"]["id"] for item in context["recent_daily_goals"]
@@ -747,6 +875,19 @@ def _strip_carryover_prefix(text: str) -> str:
     cleaned = re.sub(r'继续完成[「『"“][^」』"”]+[」』"”]未完成目标[：:]\s*', "", text).strip()
     cleaned = re.sub(r"继续完成未完成目标[：:]\s*", "", cleaned).strip()
     return cleaned or text.strip()
+
+
+def _project_today_goal_main_goal(project_name: str, today_goal: str) -> tuple[str, str]:
+    today_goal = str(today_goal or "").strip()
+    unwrapped = today_goal
+    wrapper_pattern = re.compile(r"^围绕「[^」]+」交付[:：]\s*")
+    while True:
+        next_value = wrapper_pattern.sub("", unwrapped, count=1).strip()
+        if next_value == unwrapped:
+            break
+        unwrapped = next_value
+    slice_text = unwrapped or today_goal
+    return _compact_text(f"围绕「{project_name}」交付：{slice_text}", 120), _compact_text(slice_text, 80)
 
 
 def _ensure_default_profile(connection: sqlite3.Connection) -> dict[str, Any]:
@@ -1117,3 +1258,7 @@ def _clamp_int(value: Any, low: int, high: int) -> int:
 
 def _now_text() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _safe_error(exc: Exception) -> str:
+    return str(exc).replace("\n", " ").strip()[:300] or exc.__class__.__name__

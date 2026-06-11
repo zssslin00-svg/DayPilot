@@ -257,7 +257,7 @@ def main() -> None:
             status, project_create = _post_json(
                 f"{backend_base}/api/projects/lifecycle",
                 {
-                    "message": "新增 P0 项目：微调一个编排规则的模型。当前进度：还没确定实现方案。目标：先确定方案。",
+                    "message": "新增 P0 项目：微调一个编排规则的模型。当前进度：还没确定实现方案。项目最终目标：形成可复查的规则编排微调方案。项目今日目标：先确定方案。",
                 },
             )
             assert status == 200

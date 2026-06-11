@@ -29,6 +29,33 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def _soul_path_for_db(db_path: Path) -> Path:
+    soul_path = db_path.with_name("SOUL.md")
+    if not soul_path.exists():
+        soul_path.write_text(
+            "\n".join(
+                [
+                    "# DayPilot SOUL",
+                    "",
+                    "## 长期方向",
+                    "",
+                    "Build a useful daily goal and weekly report loop.",
+                    "",
+                    "## 当前项目",
+                    "",
+                    "1. P2 DayPilot MVP。",
+                    "2. P2 Weekly focus handoff。",
+                    "",
+                    "每日生成规则：",
+                    "",
+                    "- 每个 active 项目都生成一个今日目标。",
+                ]
+            ),
+            encoding="utf-8",
+        )
+    return soul_path
+
+
 def _get_today_goal(today: date, db_path: Path) -> tuple[int, dict[str, Any]]:
     port = _free_port()
     server = create_server(
@@ -36,6 +63,7 @@ def _get_today_goal(today: date, db_path: Path) -> tuple[int, dict[str, Any]]:
         port,
         today_provider=lambda: today,
         db_path=db_path,
+        soul_path=_soul_path_for_db(db_path),
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -58,6 +86,7 @@ def _post_checkin(today: date, db_path: Path, body: dict[str, Any]) -> tuple[int
         port,
         today_provider=lambda: today,
         db_path=db_path,
+        soul_path=_soul_path_for_db(db_path),
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
