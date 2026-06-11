@@ -64,7 +64,7 @@ def _request(
         thread.join(timeout=5)
 
 
-def _write_soul(path: Path) -> None:
+def _write_soul(path: Path, current_projects: str | None = None) -> None:
     path.write_text(
         "\n".join(
             [
@@ -72,8 +72,13 @@ def _write_soul(path: Path) -> None:
                 "",
                 "## 当前项目",
                 "",
-                "1. P0 Alpha 项目：当前进度：新的 Alpha 进度。目标：确认 Alpha 最小闭环。",
-                "2. P1 Beta 项目：当前进度：刚开始。目标：写出 Beta 方案。",
+                current_projects
+                or "\n".join(
+                    [
+                        "1. P0 Alpha 项目：当前进度：新的 Alpha 进度。目标：确认 Alpha 最小闭环。",
+                        "2. P1 Beta 项目：当前进度：刚开始。目标：写出 Beta 方案。",
+                    ]
+                ),
                 "",
                 "每日生成规则：",
                 "",
@@ -140,8 +145,57 @@ def test_soul_project_import_api_updates_projects_and_today_goal() -> None:
         assert len(today["goals"]) == 2
 
 
+def test_today_goal_auto_imports_soul_projects_before_generation() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        db_path = root / "soul-auto-import-api.sqlite3"
+        soul_path = root / "SOUL.md"
+        _write_soul(soul_path)
+
+        status, today = _request(db_path, soul_path, "GET", "/api/today-goal")
+        assert status == 200
+        assert today["is_workday"] is True
+        assert today["soul_project_import"]["status"] == "applied"
+        assert today["soul_project_import"]["created_count"] == 2
+        assert today["active_project_count"] == 2
+        assert [goal["project"]["name"] for goal in today["goals"]] == ["Alpha 项目", "Beta 项目"]
+
+
+def test_regenerate_today_goal_imports_latest_soul_first() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        db_path = root / "soul-regenerate-import-api.sqlite3"
+        soul_path = root / "SOUL.md"
+        _write_soul(
+            soul_path,
+            "1. P0 Alpha 项目：当前进度：旧进度。目标：确认 Alpha 最小闭环。",
+        )
+
+        status, first_today = _request(db_path, soul_path, "GET", "/api/today-goal")
+        assert status == 200
+        assert first_today["active_project_count"] == 1
+
+        _write_soul(
+            soul_path,
+            "\n".join(
+                [
+                    "1. P0 Alpha 项目：当前进度：新的 Alpha 进度。目标：确认 Alpha 最小闭环。",
+                    "2. P1 Beta 项目：当前进度：刚开始。目标：写出 Beta 方案。",
+                ]
+            ),
+        )
+        status, regenerated = _request(db_path, soul_path, "POST", "/api/today-goal/regenerate")
+        assert status == 200
+        assert regenerated["soul_project_import"]["status"] == "applied"
+        assert regenerated["soul_project_import"]["created_count"] == 1
+        assert regenerated["soul_project_import"]["updated_count"] == 1
+        assert regenerated["active_project_count"] == 2
+
+
 def main() -> None:
     test_soul_project_import_api_updates_projects_and_today_goal()
+    test_today_goal_auto_imports_soul_projects_before_generation()
+    test_regenerate_today_goal_imports_latest_soul_first()
     print("PASS: SOUL.md project import API updates projects and today goals")
 
 

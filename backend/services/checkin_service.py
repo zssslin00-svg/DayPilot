@@ -8,6 +8,7 @@ from typing import Any
 from backend.repositories import daypilot_repository as repo
 from backend.repositories.database import initialize_database
 from backend.services.difficulty_controller import update_ability_state_after_checkin
+from backend.services.soul_context import SOUL_PATH
 from backend.services.workday_policy import is_workday
 
 
@@ -36,6 +37,7 @@ def save_daily_checkin(
     request_body: dict[str, Any],
     *,
     default_date: date,
+    soul_path: str | Path = SOUL_PATH,
 ) -> CheckinResult:
     checkin_date = _parse_checkin_date(request_body.get("date"), default_date)
     if not is_workday(checkin_date):
@@ -100,6 +102,7 @@ def save_daily_checkin(
         project_progress_update = _update_project_progress_after_checkin(
             db_path,
             int(checkin["id"]),
+            soul_path=soul_path,
         )
 
         if should_refresh_weekly_report:
@@ -130,11 +133,13 @@ def save_daily_checkin(
 def _update_project_progress_after_checkin(
     db_path: str | Path,
     checkin_id: int,
+    *,
+    soul_path: str | Path,
 ) -> dict[str, Any]:
     from backend.services.project_progress_service import update_project_progress_for_checkin
 
     try:
-        result = update_project_progress_for_checkin(db_path, checkin_id)
+        result = update_project_progress_for_checkin(db_path, checkin_id, soul_path=soul_path)
     except Exception as exc:  # noqa: BLE001 - check-in save must not be rolled back
         return {
             "status": "failed",

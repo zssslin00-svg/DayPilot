@@ -207,7 +207,8 @@ def test_deepseek_create_project_updates_db_profile_soul_and_event() -> None:
         assert events[0]["action"] == "create_project"
         soul_text = soul_path.read_text(encoding="utf-8")
         assert "微调一个编排规则的模型" in soul_text
-        assert "还没确定实现方案" not in soul_text
+        assert "当前进度：还没确定实现方案、数据集结构" in soul_text
+        assert "目标：先确定方案和数据结构" in soul_text
         assert "## 用户偏好" in soul_text
 
 

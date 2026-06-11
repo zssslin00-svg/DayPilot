@@ -77,6 +77,7 @@ def _request_today(method: str, path: str, today: date, db_path: Path) -> tuple[
         port,
         today_provider=lambda: today,
         db_path=db_path,
+        soul_path=db_path.parent / "missing-SOUL.md",
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

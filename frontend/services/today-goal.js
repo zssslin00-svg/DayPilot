@@ -229,6 +229,13 @@ function showSoulProjectImportNotice(payload) {
   if (!payload || payload.status === "no_change") {
     return;
   }
+  if (payload.status === "failed") {
+    showAlert(payload.message || payload.reason || "SOUL.md 当前项目同步失败。");
+    return;
+  }
+  if (payload.status === "skipped") {
+    return;
+  }
   const changed =
     Number(payload.created_count || 0) +
     Number(payload.updated_count || 0) +
@@ -320,6 +327,7 @@ async function handleProjectLifecycleSubmit(event) {
 async function renderTodayGoalAndSyncHistory(payload) {
   renderTodayGoal(payload);
   await loadHistory();
+  showSoulProjectImportNotice(payload.soul_project_import);
 }
 
 function renderTodayGoal(payload) {

@@ -112,8 +112,10 @@ def test_soul_project_import_adds_updates_renames_completes_and_is_idempotent() 
             connection.close()
 
         assert alpha["status_summary"] == "新的 Alpha 进度"
+        assert repo.project_target_goal(alpha) == "确认 Alpha 最小闭环"
         assert beta is not None
         assert beta["priority"] == "P1"
+        assert repo.project_target_goal(beta) == "写出 Beta 方案"
         assert len(goals) == 2
 
         repeated = import_current_projects_from_soul(db_path, soul_path=soul_path, today=WORKDAY).payload
@@ -162,8 +164,36 @@ def test_soul_project_import_adds_updates_renames_completes_and_is_idempotent() 
         assert profile["current_focus_projects"] == ["Alpha 改名后项目"]
 
 
+def test_soul_project_import_no_active_projects_clears_profile_projects() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        db_path = root / "soul-import-empty.sqlite3"
+        soul_path = root / "SOUL.md"
+        _seed_db(db_path)
+
+        _write_soul(soul_path, "暂无 active 项目。")
+        result = import_current_projects_from_soul(db_path, soul_path=soul_path, today=WORKDAY).payload
+
+        assert result["status"] == "applied"
+        assert result["completed_count"] == 1
+
+        connection = initialize_database(db_path)
+        try:
+            active_projects = repo.list_projects(connection)
+            alpha = repo.get_project(connection, 1)
+            profile = repo.get_user_profile(connection)
+        finally:
+            connection.close()
+
+        assert active_projects == []
+        assert alpha["status"] == "completed"
+        assert profile["current_focus_projects"] == []
+        assert profile["goal_preferences"]["project_priorities"] == []
+
+
 def main() -> None:
     test_soul_project_import_adds_updates_renames_completes_and_is_idempotent()
+    test_soul_project_import_no_active_projects_clears_profile_projects()
     print("PASS: SOUL.md current project import adds, updates, renames, completes, and stays idempotent")
 
 

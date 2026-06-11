@@ -50,7 +50,8 @@ def import_current_projects_from_soul(
     path = Path(soul_path)
     section_text = _extract_current_projects_section(path)
     entries = _parse_project_entries(section_text)
-    if not entries and not _section_declares_no_active_projects(section_text):
+    declares_no_active_projects = _section_declares_no_active_projects(section_text)
+    if not entries and not declares_no_active_projects:
         raise SoulProjectImportError("SOUL.md 当前项目段落没有可识别的项目列表。")
 
     _ensure_unique_names(entries)
@@ -101,6 +102,8 @@ def import_current_projects_from_soul(
             "soul_sync_error": None,
             "message": "SOUL.md 当前项目没有变化。",
         }
+    if declares_no_active_projects:
+        _sync_no_active_project_preferences(db_path)
 
     final_section_text = _read_current_section_if_possible(path, fallback=section_text)
     final_snapshot = _persist_import_state(
@@ -125,6 +128,32 @@ def import_current_projects_from_soul(
         "message": _result_message(counts, lifecycle_payload),
     }
     return SoulProjectImportResult(payload)
+
+
+def _sync_no_active_project_preferences(db_path: str | Path) -> None:
+    connection = initialize_database(db_path)
+    try:
+        with connection:
+            profile = repo.get_user_profile(connection)
+            if profile is None:
+                repo.create_user_profile(
+                    connection,
+                    id=1,
+                    long_term_direction="当前没有 active 项目，项目状态由 SOUL.md 管理。",
+                    current_focus_projects=[],
+                    goal_preferences={"project_priorities": []},
+                )
+                return
+            preferences = dict(profile.get("goal_preferences") or {})
+            preferences["project_priorities"] = []
+            repo.update_user_profile(
+                connection,
+                int(profile["id"]),
+                current_focus_projects=[],
+                goal_preferences=preferences,
+            )
+    finally:
+        connection.close()
 
 
 def _extract_current_projects_section(soul_path: Path) -> str:

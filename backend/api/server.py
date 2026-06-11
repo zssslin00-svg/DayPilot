@@ -193,6 +193,7 @@ class DayPilotHandler(BaseHTTPRequestHandler):
             )
             return
 
+        soul_project_import = self._import_soul_projects_for_today(today)
         try:
             result = get_or_generate_today_goal(self.server.db_path, today)
         except DailyGoalGenerationError as exc:
@@ -213,6 +214,7 @@ class DayPilotHandler(BaseHTTPRequestHandler):
                 "active_project_count": len(result.goals),
                 "goals": result.goals,
                 "goal": result.goal,
+                "soul_project_import": soul_project_import,
             },
         )
 
@@ -231,6 +233,7 @@ class DayPilotHandler(BaseHTTPRequestHandler):
             )
             return
 
+        soul_project_import = self._import_soul_projects_for_today(today)
         try:
             result = regenerate_today_goal(self.server.db_path, today)
         except DailyGoalGenerationError as exc:
@@ -249,8 +252,26 @@ class DayPilotHandler(BaseHTTPRequestHandler):
                 "active_project_count": len(result.goals),
                 "goals": result.goals,
                 "goal": result.goal,
+                "soul_project_import": soul_project_import,
             },
         )
+
+    def _import_soul_projects_for_today(self, today: date) -> dict[str, Any]:
+        try:
+            return import_current_projects_from_soul(
+                self.server.db_path,
+                soul_path=self.server.soul_path,
+                today=today,
+            ).payload
+        except SoulProjectImportError as exc:
+            reason = str(exc)
+            status = "skipped" if "不存在" in reason else "failed"
+            return {
+                "status": status,
+                "source": "SOUL.md",
+                "message": reason,
+                "reason": reason,
+            }
 
     def _handle_checkin(self) -> None:
         try:
@@ -264,6 +285,7 @@ class DayPilotHandler(BaseHTTPRequestHandler):
                 self.server.db_path,
                 payload,
                 default_date=self.server.today_provider(),
+                soul_path=self.server.soul_path,
             )
         except CheckinValidationError as exc:
             self._send_json(400, {"error": "invalid_checkin", "detail": str(exc)})

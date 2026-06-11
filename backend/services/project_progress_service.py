@@ -10,6 +10,7 @@ from backend.config.settings import DayPilotSettings
 from backend.repositories import daypilot_repository as repo
 from backend.repositories.database import initialize_database
 from backend.services.llm_client import generate_json_with_fallback
+from backend.services.soul_context import SOUL_PATH
 
 
 PROMPT_VERSION_MOCK = "project_progress_v1_mock"
@@ -115,6 +116,7 @@ def update_project_progress_for_checkin(
     checkin_id: int,
     *,
     settings: DayPilotSettings | None = None,
+    soul_path: str | Path = SOUL_PATH,
 ) -> ProjectProgressUpdateResult:
     try:
         context = _build_progress_context(db_path, checkin_id)
@@ -146,6 +148,11 @@ def update_project_progress_for_checkin(
             output=output,
             llm_metadata=llm_result.metadata,
         )
+        soul_sync = _sync_progress_to_soul(
+            db_path,
+            event_id=event_id,
+            soul_path=Path(soul_path),
+        )
         return ProjectProgressUpdateResult(
             {
                 "status": "updated",
@@ -157,6 +164,7 @@ def update_project_progress_for_checkin(
                 "fallback_reason": llm_result.metadata.get("fallback_reason"),
                 "llm_mode_used": llm_result.metadata.get("llm_mode_used"),
                 "model_name": llm_result.metadata.get("model_name"),
+                **soul_sync,
             }
         )
     except Exception as exc:  # noqa: BLE001 - check-in persistence must not be rolled back
@@ -319,6 +327,56 @@ def _persist_progress_update(
             return event_id, updated_project
     finally:
         connection.close()
+
+
+def _sync_progress_to_soul(
+    db_path: str | Path,
+    *,
+    event_id: int,
+    soul_path: Path,
+) -> dict[str, Any]:
+    try:
+        from backend.services.project_lifecycle_service import sync_current_projects_to_soul
+
+        backup_path = sync_current_projects_to_soul(db_path, soul_path=soul_path)
+        return {
+            "soul_synced": True,
+            "soul_backup": str(backup_path),
+            "soul_sync_queued": False,
+            "soul_sync_retry_job_id": None,
+            "soul_sync_error": None,
+        }
+    except Exception as exc:  # noqa: BLE001 - project progress is already persisted
+        error = _safe_error(exc)
+        try:
+            from backend.services.soul_sync_service import enqueue_soul_sync_retry
+
+            retry_job_id = enqueue_soul_sync_retry(
+                db_path,
+                job_type="project_lifecycle",
+                source_table="project_progress_events",
+                source_id=event_id,
+                payload={
+                    "project_progress_event_id": event_id,
+                    "action": "sync_project_progress_to_soul",
+                },
+                error=error,
+            )
+        except Exception as queue_exc:  # noqa: BLE001 - keep check-in response compact
+            return {
+                "soul_synced": False,
+                "soul_backup": None,
+                "soul_sync_queued": False,
+                "soul_sync_retry_job_id": None,
+                "soul_sync_error": f"{error}; retry_queue_failed={_safe_error(queue_exc)}",
+            }
+        return {
+            "soul_synced": False,
+            "soul_backup": None,
+            "soul_sync_queued": True,
+            "soul_sync_retry_job_id": retry_job_id,
+            "soul_sync_error": error,
+        }
 
 
 def _restore_superseded_project_summaries(

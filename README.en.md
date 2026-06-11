@@ -48,7 +48,7 @@ The AI is not just a task generator. It helps organize project state, rewrite to
 
 **Feedback revision and long-term memory**: On the Today page, enter feedback like "I only have 45 minutes today", "this is too large", or "I want to write code", and DayPilot will generate a new goal version. Stable preferences, such as "do not give me pure learning goals" or "each goal must leave an inspectable output", become long-term memory.
 
-**Natural-language project updates**: Add projects, mark projects complete, and update project status in natural language, or edit the current-project section in `SOUL.md` and click **Refresh** on the Today page. Project facts feed later goals and reviews.
+**Natural-language project updates**: Add projects, mark projects complete, and update project status in natural language, or edit the current-project section in `SOUL.md`. Opening or refreshing the Today page imports the latest project list, progress, and targets before goals are read or generated.
 
 **AI weekly review**: End-of-day check-ins record completion text, completion status, felt difficulty, and tomorrow's direction. On Friday, DayPilot uses that evidence to generate a weekly report and next-week focus, then accepts feedback to create a new version.
 
@@ -63,7 +63,7 @@ DayPilot needs to know who you are, what you are working on, and how you like to
 | DeepSeek config | `.env` | `DEEPSEEK_API_KEY`, model, and timeout settings | The API key is required only when `DAYPILOT_LLM_MODE=deepseek`. The real LLM path uses it to generate goals, interpret feedback, organize project state, generate weekly reports, and answer career-planning chats. |
 | Stable personal profile | `SOUL.md`, copied from `SOUL.example.md` | Long-term direction, current skills, personality and work style, development intentions, career values and constraints, current project boundaries, user preferences, avoid rules, time budget, and goal-generation principles | Read on every agent call as long-term context, shaping goals, weekly reports, career advice, and later generated content. Good for stable information, not for temporary same-day details. |
 | Career planning chat | Left-side **Career Planning** in the web app | Spare time, career questions, desired direction, current skills, and personality notes | Gives direction analysis, clarifying questions, project suggestions, risks, and next actions. Clear and stable new profile facts are written to SQLite and `SOUL.md` automatically. |
-| Project changes | Left-side **Project Update**, or edit `SOUL.md` and click Today **Refresh** | "Add project: ... current progress: ... goal: ...", or maintain the current-project numbered/bulleted list in `SOUL.md` | Written to the SQLite project table and reflected in the current-project section of `SOUL.md`; active projects removed from that list are marked completed, with history preserved. |
+| Project changes | Left-side **Project Update**, or edit the current-project section in `SOUL.md` | "Add project: ... current progress: ... goal: ...", or maintain one-line entries like `P0 Project name: current progress: ... goal: ...` | Written to the SQLite project table and reflected in the current-project section of `SOUL.md`; opening or refreshing Today imports SOUL first, and active projects removed from that list are marked completed with history preserved. |
 | Today's preference or constraint | Today page **Feedback Revision** | "I only have 30 minutes today", "this goal is too large", "I want to do experiments", or "do not give abstract goals later" | First revises today's goal. If it is a stable preference or avoid pattern, it becomes long-term memory. |
 | End-of-day facts | Today page **Check-in** | Completion status, completion notes, felt difficulty, and tomorrow's direction | Used as history, project-progress evidence, weekly-report evidence, and the handoff into the next day's goal. |
 | Weekly report preference | Weekly page **Weekly Report Feedback** | "Make next week's plan more verifiable" or "do not write it like a diary log" | Generates a new weekly report version and saves stable weekly-report preferences. |
@@ -77,7 +77,7 @@ What capability I want to build over time, or what direction I want this project
 
 ## Current Projects
 
-1. Project name: current stage, recent blockers, and what I hope to advance today.
+1. P0 Project name: current progress: current stage and recent blockers. goal: what I hope to advance today.
 
 ## Current Skills
 
@@ -126,7 +126,7 @@ Do not put API keys, account passwords, or private tokens in `SOUL.md` or the RE
 
 "Starts on any computer" means a Windows, macOS, or Linux machine with Python 3.10+. Mock mode does not need a DeepSeek key; real DeepSeek mode needs access to the DeepSeek API and a valid `DEEPSEEK_API_KEY`. DayPilot currently does not require `npm install` or extra Python dependencies.
 
-> **Important: after configuring the API key, return to the DayPilot page and click the Refresh button so the new configuration and latest context take effect.**
+> **Important: edit the `Current Projects` section in `SOUL.md` and the API key in `.env` before starting. The Today page imports SOUL automatically on first open; while the app is running, click Refresh after editing SOUL to sync immediately.**
 
 ### Windows
 
@@ -278,7 +278,8 @@ scripts\restore_latest_db.bat
 ## How Data Stays In Sync
 
 - You do not need to remember database fields. DayPilot keeps the latest project state organized, and the project summary, progress, and planning guidance shown in the app come from that state.
-- You can update projects in the web app, or edit the `Current Projects` section in `SOUL.md`. After you click **Refresh** on the Today page, new projects are imported, renames, progress, and priority changes are synced, and projects removed from the list are marked completed instead of deleted.
+- You can update projects in the web app, or edit the `Current Projects` section in `SOUL.md`. Opening or refreshing the Today page imports new projects and syncs renames, progress, targets, and priority changes; projects removed from the list are marked completed instead of deleted.
+- Check-in-derived project progress is written back to the current-project section in `SOUL.md`; if that write fails, the local retry queue will try again in the background.
 - When a project changes in a meaningful way, today's goal can refresh too, so DayPilot does not keep using an old project name or stale goal.
 - Every time today's goal is generated, regenerated, or revised with feedback, History shows the latest version. Older versions stay in the background for later review.
 - If you edit today's check-in, the new content replaces the old progress update, so outdated notes do not keep affecting the project.

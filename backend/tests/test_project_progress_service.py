@@ -18,6 +18,7 @@ from backend.services.project_progress_service import (  # noqa: E402
     ensure_projects_seeded,
     update_project_progress_for_checkin,
 )
+from backend.services.soul_sync_service import retry_soul_sync_jobs  # noqa: E402
 
 
 class FakeResponse:
@@ -124,6 +125,27 @@ def _seed_db(db_path: Path, completion_text: str | None = None) -> int:
         connection.close()
 
 
+def _soul_file(root: Path) -> Path:
+    path = root / "SOUL.md"
+    path.write_text(
+        "\n".join(
+            [
+                "# DayPilot SOUL",
+                "",
+                "## 当前项目",
+                "",
+                "旧项目段落",
+                "",
+                "## 用户偏好",
+                "",
+                "- 小目标。",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_projects_seed_from_profile_priorities() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         db_path = Path(temp_dir) / "daypilot-projects.sqlite3"
@@ -182,13 +204,16 @@ def test_seed_reuses_auto_default_project_when_profile_id_collides() -> None:
 
 def test_mock_update_writes_event_and_updates_summary() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
-        db_path = Path(temp_dir) / "daypilot-project-progress.sqlite3"
+        root = Path(temp_dir)
+        db_path = root / "daypilot-project-progress.sqlite3"
+        soul_path = _soul_file(root)
         checkin_id = _seed_db(db_path)
 
         result = update_project_progress_for_checkin(
             db_path,
             checkin_id,
             settings=_settings(mode="mock"),
+            soul_path=soul_path,
         ).payload
 
         assert result["status"] == "updated"
@@ -211,11 +236,15 @@ def test_mock_update_writes_event_and_updates_summary() -> None:
         assert "前端提示需要更精简" in project["status_summary"]
         assert len(events) == 1
         assert events[0]["applied_to_summary"] == 1
+        assert result["soul_synced"] is True
+        assert "当前进度：" in soul_path.read_text(encoding="utf-8")
 
 
 def test_low_confidence_deepseek_output_still_updates_summary() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
-        db_path = Path(temp_dir) / "daypilot-project-progress-low-confidence.sqlite3"
+        root = Path(temp_dir)
+        db_path = root / "daypilot-project-progress-low-confidence.sqlite3"
+        soul_path = _soul_file(root)
         checkin_id = _seed_db(db_path)
         output = {
             "project_id": 2,
@@ -234,6 +263,7 @@ def test_low_confidence_deepseek_output_still_updates_summary() -> None:
                 db_path,
                 checkin_id,
                 settings=_settings(mode="deepseek"),
+                soul_path=soul_path,
             ).payload
         finally:
             urllib.request.urlopen = original  # type: ignore[assignment]
@@ -255,7 +285,9 @@ def test_low_confidence_deepseek_output_still_updates_summary() -> None:
 
 def test_invalid_deepseek_output_falls_back_to_mock_update() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
-        db_path = Path(temp_dir) / "daypilot-project-progress-fallback.sqlite3"
+        root = Path(temp_dir)
+        db_path = root / "daypilot-project-progress-fallback.sqlite3"
+        soul_path = _soul_file(root)
         checkin_id = _seed_db(db_path)
         original = urllib.request.urlopen
         try:
@@ -274,6 +306,7 @@ def test_invalid_deepseek_output_falls_back_to_mock_update() -> None:
                 db_path,
                 checkin_id,
                 settings=_settings(mode="deepseek"),
+                soul_path=soul_path,
             ).payload
         finally:
             urllib.request.urlopen = original  # type: ignore[assignment]
@@ -284,14 +317,43 @@ def test_invalid_deepseek_output_falls_back_to_mock_update() -> None:
         assert result["llm_mode_used"] == "mock"
 
 
+def test_project_progress_soul_failure_is_queued_and_retry_succeeds() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        db_path = root / "daypilot-project-progress-soul-retry.sqlite3"
+        soul_path = root / "SOUL.md"
+        soul_path.write_text("# DayPilot SOUL\n\n## Broken\n", encoding="utf-8")
+        checkin_id = _seed_db(db_path)
+
+        result = update_project_progress_for_checkin(
+            db_path,
+            checkin_id,
+            settings=_settings(mode="mock"),
+            soul_path=soul_path,
+        ).payload
+
+        assert result["status"] == "updated"
+        assert result["soul_synced"] is False
+        assert result["soul_sync_queued"] is True
+
+        _soul_file(root)
+        retry_payload = retry_soul_sync_jobs(db_path, soul_path=soul_path).payload
+        assert retry_payload["retried"] == 1
+        assert retry_payload["results"][0]["status"] == "succeeded"
+        assert "当前进度：" in soul_path.read_text(encoding="utf-8")
+
+
 def test_editing_same_checkin_supersedes_old_event() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
-        db_path = Path(temp_dir) / "daypilot-project-progress-edit.sqlite3"
+        root = Path(temp_dir)
+        db_path = root / "daypilot-project-progress-edit.sqlite3"
+        soul_path = _soul_file(root)
         checkin_id = _seed_db(db_path)
         first = update_project_progress_for_checkin(
             db_path,
             checkin_id,
             settings=_settings(mode="mock"),
+            soul_path=soul_path,
         ).payload
 
         connection = connect_database(db_path)
@@ -310,6 +372,7 @@ def test_editing_same_checkin_supersedes_old_event() -> None:
             db_path,
             checkin_id,
             settings=_settings(mode="mock"),
+            soul_path=soul_path,
         ).payload
 
         connection = connect_database(db_path)
@@ -356,6 +419,7 @@ def main() -> None:
     test_mock_update_writes_event_and_updates_summary()
     test_low_confidence_deepseek_output_still_updates_summary()
     test_invalid_deepseek_output_falls_back_to_mock_update()
+    test_project_progress_soul_failure_is_queued_and_retry_succeeds()
     test_editing_same_checkin_supersedes_old_event()
     print("PASS: project progress seeding, DeepSeek routing, fallback, and edits verified")
 

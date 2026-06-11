@@ -30,11 +30,15 @@ def _free_port() -> int:
 
 def _post_checkin(today: date, db_path: Path, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     port = _free_port()
+    soul_path = db_path.parent / "SOUL.md"
+    if not soul_path.exists():
+        _valid_soul_file(soul_path)
     server = create_server(
         "127.0.0.1",
         port,
         today_provider=lambda: today,
         db_path=db_path,
+        soul_path=soul_path,
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -59,6 +63,25 @@ def _post_checkin(today: date, db_path: Path, body: dict[str, Any]) -> tuple[int
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def _valid_soul_file(path: Path) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "# DayPilot SOUL",
+                "",
+                "## 当前项目",
+                "",
+                "旧项目段落",
+                "",
+                "## 用户偏好",
+                "",
+                "- 小目标。",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
 
 def _seed_goal(db_path: Path, goal_date: str) -> int:
@@ -161,6 +184,35 @@ def test_checkin_empty_completion_text_uses_incomplete_status_rate() -> None:
             payload["updated_difficulty"]["completion_parse_result"]["source"]
             == "completion_status_incomplete"
         )
+
+
+def test_checkin_project_progress_syncs_to_soul() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        db_path = root / "daypilot-checkin-soul-progress.sqlite3"
+        soul_path = root / "SOUL.md"
+        goal_id = _seed_goal(db_path, "2026-06-08")
+
+        status, payload = _post_checkin(
+            date(2026, 6, 8),
+            db_path,
+            {
+                "date": "2026-06-08",
+                "goal_id": goal_id,
+                "completion_text": "完成项目进度同步测试，留下可复查记录。",
+                "felt_difficulty": 3,
+                "tomorrow_direction": "继续验证 SOUL 项目入口。",
+            },
+        )
+
+        assert status == 200
+        progress = payload["project_progress_update"]
+        assert progress["status"] == "updated"
+        assert progress["soul_synced"] is True
+        assert progress["soul_sync_queued"] is False
+        soul_text = soul_path.read_text(encoding="utf-8")
+        assert "当前进度：" in soul_text
+        assert "目标：" in soul_text or "P2" in soul_text
 
 
 def test_checkin_updates_existing_submission() -> None:
@@ -334,6 +386,7 @@ def test_friday_checkin_can_generate_weekly_report() -> None:
 def main() -> None:
     test_checkin_allows_empty_text_fields_and_uses_completed_status_rate()
     test_checkin_empty_completion_text_uses_incomplete_status_rate()
+    test_checkin_project_progress_syncs_to_soul()
     test_checkin_updates_existing_submission()
     test_checkin_rejects_edit_after_submission_day()
     test_checkin_rejects_invalid_felt_difficulty()

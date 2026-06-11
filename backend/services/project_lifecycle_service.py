@@ -945,12 +945,8 @@ def _apply_no_change(connection: sqlite3.Connection, output: dict[str, Any]) -> 
 
 
 def _sync_user_profile_projects(connection: sqlite3.Connection) -> None:
-    profile = repo.get_user_profile(connection)
-    if profile is None:
-        return
     active_projects = repo.list_projects(connection)
-    preferences = dict(profile.get("goal_preferences") or {})
-    preferences["project_priorities"] = [
+    project_priorities = [
         {
             "priority": project["priority"],
             "role": project.get("role") or _role_for_priority(project.get("priority")),
@@ -961,6 +957,21 @@ def _sync_user_profile_projects(connection: sqlite3.Connection) -> None:
         }
         for project in active_projects
     ]
+    profile = repo.get_user_profile(connection)
+    if profile is None:
+        repo.create_user_profile(
+            connection,
+            id=1,
+            long_term_direction="项目状态由 SOUL.md 和 DayPilot 项目更新共同管理。",
+            current_focus_projects=[project["name"] for project in active_projects],
+            goal_preferences={
+                "project_priorities": project_priorities,
+                "updated_from_project_lifecycle_at": _now_text(),
+            },
+        )
+        return
+    preferences = dict(profile.get("goal_preferences") or {})
+    preferences["project_priorities"] = project_priorities
     policy = preferences.get("priority_policy")
     if isinstance(policy, dict):
         policy["order"] = _priority_order_for_projects(active_projects)
@@ -1002,11 +1013,11 @@ def _render_current_projects_section(active_projects: list[dict[str, Any]]) -> s
         return "\n".join(lines).rstrip()
 
     for index, project in enumerate(projects, start=1):
-        lines.append(f"{index}. {project['name']}。")
+        lines.append(_render_current_project_line(index, project))
     lines.extend(
         [
             "",
-            "项目的当前进度、阶段变化、最近阻塞和临时优先级以数据库中的结构化记录为准，不写入 SOUL.md。SOUL.md 只保留长期稳定原则、项目边界和目标生成纪律。",
+            "本段落由 DayPilot 管理，也可以手动编辑。使用单行清单维护 active 项目；从列表移除的项目会标记完成，写“暂无 active 项目。”表示当前没有 active 项目。",
             "",
             "每日生成规则：",
             "",
@@ -1017,6 +1028,25 @@ def _render_current_projects_section(active_projects: list[dict[str, Any]]) -> s
         ]
     )
     return "\n".join(lines).rstrip()
+
+
+def _render_current_project_line(index: int, project: dict[str, Any]) -> str:
+    priority = str(project.get("priority") or "P2").strip() or "P2"
+    name = _soul_line_value(project.get("name"), limit=120)
+    summary = _soul_line_value(project.get("status_summary"), limit=180)
+    target = _soul_line_value(repo.project_target_goal(project), limit=160)
+    parts = [f"{priority} {name}"]
+    if summary:
+        parts.append(f"当前进度：{summary}")
+    if target:
+        parts.append(f"目标：{target}")
+    return f"{index}. {'；'.join(parts)}。"
+
+
+def _soul_line_value(value: Any, *, limit: int) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    text = re.sub(r"[。；;]+", "，", text).strip(" ，,")
+    return text[:limit].strip()
 
 
 def _backup_soul(soul_path: Path) -> Path:
