@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="docs/assets/daypilot-hero-banner.png" alt="DayPilot brand banner" width="920">
+  <img src="docs/assets/daypilot-hero-banner.png" alt="DayPilot AI daily workbench banner" width="920">
 </p>
 
 <p align="center">
-  <img src="docs/assets/daypilot-logo.png" alt="DayPilot Logo" width="112">
+  <img src="docs/assets/daypilot-logo.png" alt="DayPilot AI workbench logo" width="112">
 </p>
 
 <h1 align="center">DayPilot</h1>
 
-<p align="center">A local, private, single-user daily workbench: turn long-term direction into small deliverables for today, then generate a Friday review.</p>
+<p align="center">A local-first, privately controlled AI daily workbench that learns your habits over time: it adjusts goals from your profile, project progress, and daily feedback, then generates weekly reviews.</p>
 
 <p align="center">
   <a href="README.md">中文</a>
@@ -25,41 +25,43 @@
 
 ## What Is DayPilot
 
-DayPilot is a personal work agent designed around roughly four effective work hours per day. It does not try to replace your big life planning. Instead, it compresses your long-term direction, current projects, preferences, and constraints into a goal you can deliver, check, and review today.
+DayPilot is a local-first, single-user, privately controlled AI daily workbench designed around roughly four effective work hours per day. It does not try to replace your big life planning. Instead, it compresses your long-term direction, current projects, preferences, and constraints into a goal you can deliver, check, and review today.
+
+It keeps learning from `SOUL.md`, the SQLite user profile, project history, feedback revisions, check-ins, and weekly-report preferences. The more you use it, the closer DayPilot can stay to your work rhythm, output preferences, energy boundaries, and career direction.
 
 Its core loop is short:
 
-1. On workdays, it reads your long-term context and current projects, then generates today's goal.
+1. On workdays, it reads your long-term context, current projects, and profile data, then generates today's goal.
 2. During the day, you can revise the goal with feedback, such as narrowing scope, changing the output format, or adjusting the time budget.
-3. In the evening, you submit a check-in with completion status, subjective difficulty, and tomorrow's direction.
-4. On Friday, it generates a weekly report and next-week focus from the week's records.
+3. In the evening, you submit a check-in with completion status, subjective difficulty, project progress, and tomorrow's direction.
+4. On Friday, it generates a weekly report and next-week focus from the week's records, then uses stable preferences to shape later output.
 
-By default, data stays on your machine: the SQLite database, LLM logs, backups, and your real `SOUL.md` are not uploaded to external services, except for the DeepSeek API calls you configure.
+The AI is not just a task generator. It helps organize project state, rewrite today's goal, adjust weekly-report focus, suggest profile updates, and support career-planning conversations. By default, data stays on your machine: the SQLite database, LLM logs, backups, and your real `SOUL.md` are not uploaded to external services, except for the DeepSeek API calls you configure.
 
 ## Features
 
-**Daily goal**: Generate a small and deliverable goal for the active project, with acceptance criteria, minimum output, time estimate, and difficulty.
+**Local private workbench**: Keep the SQLite database, LLM logs, backups, and real `SOUL.md` on your machine by default, so personal projects, preferences, reviews, and career context can compound privately.
 
-**Feedback revision**: On the Today page, enter feedback like "I only have 45 minutes today", "this is too large", or "I want to write code", and DayPilot will generate a new goal version.
+**A personal profile that gets smarter with use**: Detect habits and constraints from stable context, daily feedback, check-ins, weekly-report preferences, and career chat. New profile facts become pending suggestions first, then are written to SQLite and `SOUL.md` only after confirmation.
 
-**Career planning chat**: In the **Career Planning** tab, talk to a private career-development planning assistant. It reads `SOUL.md`, the structured user profile, project history, ability state, and recent records to help decide what to do with spare time and how to build transferable skills and portfolio evidence.
+**AI project and goal adjustment**: Generate small, deliverable goals for active projects with acceptance criteria, minimum output, time estimate, and difficulty. Changes to project names, summaries, planning guidance, targets, or priority can refresh the matching daily goal.
 
-**Long-term memory**: When feedback reveals a stable preference, such as "do not give me pure learning goals" or "each goal must leave an inspectable output", the system writes it to the database and syncs it into the user profile section of `SOUL.md`.
+**Feedback revision and long-term memory**: On the Today page, enter feedback like "I only have 45 minutes today", "this is too large", or "I want to write code", and DayPilot will generate a new goal version. Stable preferences, such as "do not give me pure learning goals" or "each goal must leave an inspectable output", become long-term memory.
 
-**Project updates**: Add projects, mark projects complete, and update project status in natural language, or edit the current-project section in `SOUL.md` and click **Refresh** on the Today page. The system keeps the current project list in sync.
+**Natural-language project updates**: Add projects, mark projects complete, and update project status in natural language, or edit the current-project section in `SOUL.md` and click **Refresh** on the Today page. Project facts feed later goals and reviews.
 
-**End-of-day check-in**: Record completion text, completion status, felt difficulty, and tomorrow's direction as evidence for later goals and weekly reports.
+**AI weekly review**: End-of-day check-ins record completion text, completion status, felt difficulty, and tomorrow's direction. On Friday, DayPilot uses that evidence to generate a weekly report and next-week focus, then accepts feedback to create a new version.
 
-**Weekly review**: Generate a Friday weekly report and next-week focus, then continue giving feedback to create a new version.
+**Career planning assistant**: In the **Career Planning** tab, talk to a private career-development planning assistant. It reads `SOUL.md`, the structured user profile, project history, ability state, and recent records to help decide what to do with spare time and how to build transferable skills and portfolio evidence.
 
 ## How To Enter Personal Context
 
-DayPilot needs to know who you are, what you are working on, and how you like to work. There are two kinds of input: stable context before startup, and daily context inside the web app.
+DayPilot needs to know who you are, what you are working on, and how you like to work. There are two kinds of input: stable context before startup, and daily context inside the web app. This context shapes later daily goals, project adjustments, weekly reviews, career-planning advice, and generated content style.
 
 | Entry | Where to enter it | What to enter | How the system uses it |
 | --- | --- | --- | --- |
-| DeepSeek config | `.env` | `DEEPSEEK_API_KEY`, model, and timeout settings | The API key is required only when `DAYPILOT_LLM_MODE=deepseek`. The real LLM path uses it to generate goals, interpret feedback, and generate weekly reports. |
-| Stable personal profile | `SOUL.md`, copied from `SOUL.example.md` | Long-term direction, current skills, personality and work style, development intentions, career values and constraints, current project boundaries, user preferences, avoid rules, time budget, and goal-generation principles | Read on every agent call as long-term context. Good for stable information, not for temporary same-day details. |
+| DeepSeek config | `.env` | `DEEPSEEK_API_KEY`, model, and timeout settings | The API key is required only when `DAYPILOT_LLM_MODE=deepseek`. The real LLM path uses it to generate goals, interpret feedback, organize project state, generate weekly reports, and answer career-planning chats. |
+| Stable personal profile | `SOUL.md`, copied from `SOUL.example.md` | Long-term direction, current skills, personality and work style, development intentions, career values and constraints, current project boundaries, user preferences, avoid rules, time budget, and goal-generation principles | Read on every agent call as long-term context, shaping goals, weekly reports, career advice, and later generated content. Good for stable information, not for temporary same-day details. |
 | Career planning chat | Left-side **Career Planning** in the web app | Spare time, career questions, desired direction, current skills, and personality notes | Gives direction analysis, clarifying questions, project suggestions, risks, and next actions. New profile facts become pending suggestions first, then are written to SQLite and `SOUL.md` only after user confirmation. |
 | Project changes | Left-side **Project Update**, or edit `SOUL.md` and click Today **Refresh** | "Add project: ... current progress: ... goal: ...", or maintain the current-project numbered/bulleted list in `SOUL.md` | Written to the SQLite project table and reflected in the current-project section of `SOUL.md`; active projects removed from that list are marked completed, with history preserved. |
 | Today's preference or constraint | Today page **Feedback Revision** | "I only have 30 minutes today", "this goal is too large", "I want to do experiments", or "do not give abstract goals later" | First revises today's goal. If it is a stable preference or avoid pattern, it becomes long-term memory. |
@@ -325,6 +327,7 @@ scripts\restore_latest_db.bat
 
 ## Data Safety
 
+- DayPilot keeps personal databases, profiles, backups, and logs on your machine by default. In real LLM mode, it sends only the context needed for the current AI feature to your configured DeepSeek API endpoint.
 - `.env` is ignored by git and should contain only your local API key.
 - `data/db/`, `data/backups/`, `data/tmp/`, and `data/llm_logs/` are ignored by default.
 - LLM logs do not write API keys or Authorization headers.
