@@ -51,6 +51,17 @@ const elements = {
   weeklyFeedbackMessage: document.querySelector("#weekly-feedback-message"),
   weeklyFeedbackSubmit: document.querySelector("#weekly-feedback-submit"),
   weeklyVersions: document.querySelector("#weekly-report-versions"),
+  careerNewSession: document.querySelector("#career-new-session"),
+  careerSessionList: document.querySelector("#career-session-list"),
+  careerMessageList: document.querySelector("#career-message-list"),
+  careerForm: document.querySelector("#career-chat-form"),
+  careerMessage: document.querySelector("#career-chat-message"),
+  careerAvailableMinutes: document.querySelector("#career-available-minutes"),
+  careerSubmit: document.querySelector("#career-chat-submit"),
+  careerResults: document.querySelector("#career-results"),
+  careerRecommendations: document.querySelector("#career-recommendations"),
+  careerProfileSuggestions: document.querySelector("#career-profile-suggestions"),
+  careerSuggestionList: document.querySelector("#career-suggestion-list"),
 };
 
 let currentGoalRecord = null;
@@ -61,6 +72,8 @@ let checkedInGoalIds = new Set();
 let currentWeekId = null;
 let canGenerateWeeklyReport = false;
 let latestWeeklyBundle = null;
+let currentCareerSessionId = null;
+let careerLoaded = false;
 let currentClientDate = chinaDateString();
 
 bindEvents();
@@ -88,6 +101,8 @@ function bindEvents() {
   elements.checkinForm.addEventListener("submit", handleCheckinSubmit);
   elements.weeklyGenerate.addEventListener("click", handleWeeklyReportGenerate);
   elements.weeklyFeedbackForm.addEventListener("submit", handleWeeklyFeedbackSubmit);
+  elements.careerNewSession.addEventListener("click", startNewCareerSession);
+  elements.careerForm.addEventListener("submit", handleCareerChatSubmit);
 }
 
 async function loadInitialData() {
@@ -1065,6 +1080,226 @@ function renderWeeklyVersions(versions) {
     });
 }
 
+function startNewCareerSession() {
+  currentCareerSessionId = null;
+  renderCareerMessages([]);
+  renderCareerRecommendations([]);
+  renderCareerSuggestions([]);
+  elements.careerMessage.value = "";
+  elements.careerAvailableMinutes.value = "";
+  elements.careerMessage.focus();
+}
+
+async function ensureCareerLoaded() {
+  if (careerLoaded) {
+    return;
+  }
+  careerLoaded = true;
+  await loadCareerSessions();
+}
+
+async function loadCareerSessions() {
+  try {
+    const payload = await requestJson("/api/career-chat/sessions");
+    renderCareerSessions(payload.sessions || []);
+    if (!currentCareerSessionId && payload.sessions?.length) {
+      await loadCareerHistory(payload.sessions[0].id);
+    } else if (!payload.sessions?.length) {
+      renderCareerMessages([]);
+      renderCareerRecommendations([]);
+      renderCareerSuggestions([]);
+    }
+  } catch (error) {
+    showAlert(errorMessage(error));
+  }
+}
+
+async function loadCareerHistory(sessionId) {
+  if (!sessionId) {
+    return;
+  }
+  try {
+    const payload = await requestJson(`/api/career-chat/history?session_id=${encodeURIComponent(sessionId)}`);
+    currentCareerSessionId = payload.session?.id || sessionId;
+    updateCareerSessionSelection();
+    renderCareerMessages(payload.messages || []);
+    const latestAssistant = [...(payload.messages || [])]
+      .reverse()
+      .find((message) => message.role === "assistant");
+    renderCareerRecommendations(latestAssistant?.recommendations || []);
+    renderCareerSuggestions(payload.pending_profile_update_suggestions || []);
+  } catch (error) {
+    showAlert(errorMessage(error));
+  }
+}
+
+function updateCareerSessionSelection() {
+  elements.careerSessionList.querySelectorAll(".career-session-button").forEach((button) => {
+    button.classList.toggle("active", Number(button.dataset.sessionId) === Number(currentCareerSessionId));
+  });
+}
+
+async function handleCareerChatSubmit(event) {
+  event.preventDefault();
+  const message = elements.careerMessage.value.trim();
+  if (!message) {
+    showAlert("职业规划问题不能为空。");
+    elements.careerMessage.focus();
+    return;
+  }
+  const availableMinutes = Number(elements.careerAvailableMinutes.value);
+  const body = { message, session_id: currentCareerSessionId };
+  if (Number.isFinite(availableMinutes) && availableMinutes > 0) {
+    body.available_minutes = availableMinutes;
+  }
+
+  setBusy(elements.careerSubmit, true);
+  try {
+    const payload = await requestJson("/api/career-chat", {
+      method: "POST",
+      body,
+    });
+    currentCareerSessionId = payload.session_id;
+    elements.careerMessage.value = "";
+    renderCareerRecommendations(payload.recommendations || []);
+    renderCareerSuggestions(payload.profile_update_suggestions || []);
+    await loadCareerHistory(currentCareerSessionId);
+    await loadCareerSessions();
+  } catch (error) {
+    showAlert(errorMessage(error));
+  } finally {
+    setBusy(elements.careerSubmit, false);
+  }
+}
+
+function renderCareerSessions(sessions) {
+  elements.careerSessionList.replaceChildren();
+  if (!sessions.length) {
+    elements.careerSessionList.append(emptyBlock("还没有职业规划会话。"));
+    return;
+  }
+  sessions.forEach((session) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "career-session-button";
+    button.dataset.sessionId = session.id;
+    button.classList.toggle("active", Number(session.id) === Number(currentCareerSessionId));
+    button.append(textBlock("strong", session.title || `会话 ${session.id}`));
+    button.append(textBlock("span", session.updated_at || session.created_at || ""));
+    button.addEventListener("click", () => loadCareerHistory(session.id));
+    elements.careerSessionList.append(button);
+  });
+}
+
+function renderCareerMessages(messages) {
+  elements.careerMessageList.replaceChildren();
+  if (!messages.length) {
+    elements.careerMessageList.append(emptyBlock("可以直接描述你的技能、性格、发展意愿或当前困惑。"));
+    return;
+  }
+  messages.forEach((message) => {
+    const item = document.createElement("article");
+    item.className = `career-message ${message.role === "assistant" ? "assistant" : "user"}`;
+    item.append(textBlock("strong", message.role === "assistant" ? "DayPilot" : "你"));
+    item.append(textBlock("p", message.content || ""));
+    elements.careerMessageList.append(item);
+  });
+  elements.careerMessageList.scrollTop = elements.careerMessageList.scrollHeight;
+}
+
+function renderCareerRecommendations(recommendations) {
+  elements.careerRecommendations.replaceChildren();
+  const normalized = Array.isArray(recommendations) ? recommendations : [];
+  elements.careerResults.hidden = !normalized.length;
+  normalized.forEach((recommendation) => {
+    const card = document.createElement("article");
+    card.className = "career-recommendation-card";
+    card.append(textBlock("h4", recommendation.title || "成长项目"));
+    card.append(careerMetaBlock("为什么适合", recommendation.why_it_fits));
+    const skills = document.createElement("ul");
+    renderList(skills, recommendation.skills_to_build || [], "暂未列出技能。");
+    const skillSection = document.createElement("section");
+    skillSection.append(textBlock("h5", "要提升的技能"), skills);
+    card.append(skillSection);
+    card.append(careerMetaBlock("预计时间", recommendation.estimated_time));
+    card.append(careerMetaBlock("可交付物", recommendation.deliverable));
+    card.append(careerMetaBlock("第一步", recommendation.first_step));
+    card.append(careerMetaBlock("风险", recommendation.risks));
+    card.append(careerMetaBlock("不建议现在做的理由", recommendation.not_now_reason));
+    elements.careerRecommendations.append(card);
+  });
+}
+
+function renderCareerSuggestions(suggestions) {
+  elements.careerSuggestionList.replaceChildren();
+  const pending = (Array.isArray(suggestions) ? suggestions : []).filter(
+    (suggestion) => suggestion.status === "pending",
+  );
+  elements.careerProfileSuggestions.hidden = !pending.length;
+  pending.forEach((suggestion) => {
+    const card = document.createElement("article");
+    card.className = "career-suggestion-card";
+    card.append(textBlock("h4", careerCategoryLabel(suggestion.category)));
+    const list = document.createElement("ul");
+    renderList(list, suggestion.items || [], "暂未列出。");
+    card.append(list);
+    card.append(careerMetaBlock("依据", suggestion.evidence));
+    card.append(careerMetaBlock("保存原因", suggestion.reason));
+    const actions = document.createElement("div");
+    actions.className = "career-suggestion-actions";
+    const applyButton = document.createElement("button");
+    applyButton.className = "text-button";
+    applyButton.type = "button";
+    applyButton.textContent = "确认保存";
+    applyButton.addEventListener("click", () => handleCareerSuggestionDecision(suggestion.id, "apply", applyButton));
+    const dismissButton = document.createElement("button");
+    dismissButton.className = "text-button secondary";
+    dismissButton.type = "button";
+    dismissButton.textContent = "忽略";
+    dismissButton.addEventListener("click", () =>
+      handleCareerSuggestionDecision(suggestion.id, "dismiss", dismissButton),
+    );
+    actions.append(applyButton, dismissButton);
+    card.append(actions);
+    elements.careerSuggestionList.append(card);
+  });
+}
+
+async function handleCareerSuggestionDecision(suggestionId, decision, button) {
+  setBusy(button, true);
+  try {
+    const payload = await requestJson("/api/career-chat/profile-suggestion", {
+      method: "POST",
+      body: { suggestion_id: suggestionId, decision },
+    });
+    if (payload.soul_sync_error) {
+      showAlert(`画像已保存到数据库，但 SOUL.md 同步失败：${payload.soul_sync_error}`);
+    }
+    await loadCareerHistory(currentCareerSessionId);
+  } catch (error) {
+    showAlert(errorMessage(error));
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+function careerMetaBlock(label, value) {
+  const block = document.createElement("section");
+  block.className = "career-meta-block";
+  block.append(textBlock("h5", label));
+  block.append(textBlock("p", textOrDash(value)));
+  return block;
+}
+
+function careerCategoryLabel(category) {
+  return {
+    current_skills: "当前技能点",
+    personality_and_work_style: "性格与工作方式",
+    development_intentions: "发展意愿",
+    career_values_and_constraints: "职业价值观与约束",
+  }[category] || "画像信息";
+}
+
 function checkinBodyFromForm(form, options) {
   const completion = options.completionField.value.trim();
   const data = new FormData(form);
@@ -1107,6 +1342,9 @@ function switchView(viewId) {
   elements.tabs.forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.view === viewId);
   });
+  if (viewId === "career-view") {
+    ensureCareerLoaded();
+  }
 }
 
 function setTodayFormsEnabled(enabled) {

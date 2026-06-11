@@ -15,6 +15,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.repositories.database import DEFAULT_DB_PATH  # noqa: E402
+from backend.services.career_chat_service import (  # noqa: E402
+    CareerChatGenerationError,
+    CareerChatValidationError,
+    decide_career_profile_suggestion,
+    get_career_chat_history,
+    get_career_chat_sessions,
+    send_career_chat_message,
+)
 from backend.services.checkin_service import (  # noqa: E402
     CheckinPersistenceError,
     CheckinValidationError,
@@ -102,6 +110,14 @@ class DayPilotHandler(BaseHTTPRequestHandler):
             self._handle_soul_sync_status()
             return
 
+        if path == "/api/career-chat/sessions":
+            self._handle_career_chat_sessions()
+            return
+
+        if path == "/api/career-chat/history":
+            self._handle_career_chat_history()
+            return
+
         self._send_json(404, {"error": "not_found"})
 
     def do_POST(self) -> None:
@@ -132,6 +148,14 @@ class DayPilotHandler(BaseHTTPRequestHandler):
 
         if path == "/api/soul-sync/retry":
             self._handle_soul_sync_retry()
+            return
+
+        if path == "/api/career-chat":
+            self._handle_career_chat()
+            return
+
+        if path == "/api/career-chat/profile-suggestion":
+            self._handle_career_profile_suggestion()
             return
 
         self._send_json(404, {"error": "not_found"})
@@ -394,6 +418,68 @@ class DayPilotHandler(BaseHTTPRequestHandler):
             self.server.db_path,
             soul_path=self.server.soul_path,
         )
+        self._send_json(200, result.payload)
+
+    def _handle_career_chat_sessions(self) -> None:
+        self._send_json(200, get_career_chat_sessions(self.server.db_path))
+
+    def _handle_career_chat_history(self) -> None:
+        parsed = urlparse(self.path)
+        query = parse_qs(parsed.query)
+        raw_session_id = (query.get("session_id") or [""])[0]
+        try:
+            session_id = int(raw_session_id)
+        except ValueError:
+            self._send_json(
+                400,
+                {"error": "invalid_career_chat_history", "detail": "session_id must be an integer."},
+            )
+            return
+        try:
+            self._send_json(200, get_career_chat_history(self.server.db_path, session_id))
+        except CareerChatValidationError as exc:
+            self._send_json(400, {"error": "invalid_career_chat_history", "detail": str(exc)})
+
+    def _handle_career_chat(self) -> None:
+        try:
+            payload = self._read_json_body()
+        except ValueError as exc:
+            self._send_json(400, {"error": "invalid_json", "detail": str(exc)})
+            return
+
+        try:
+            result = send_career_chat_message(
+                self.server.db_path,
+                payload,
+                soul_path=self.server.soul_path,
+                today=self.server.today_provider(),
+            )
+        except CareerChatValidationError as exc:
+            self._send_json(400, {"error": "invalid_career_chat", "detail": str(exc)})
+            return
+        except CareerChatGenerationError as exc:
+            self._send_json(500, {"error": "career_chat_failed", "detail": str(exc)})
+            return
+
+        self._send_json(200, result.payload)
+
+    def _handle_career_profile_suggestion(self) -> None:
+        try:
+            payload = self._read_json_body()
+        except ValueError as exc:
+            self._send_json(400, {"error": "invalid_json", "detail": str(exc)})
+            return
+
+        try:
+            result = decide_career_profile_suggestion(
+                self.server.db_path,
+                payload,
+                soul_path=self.server.soul_path,
+            )
+        except CareerChatValidationError as exc:
+            self._send_json(400, {"error": "invalid_career_profile_suggestion", "detail": str(exc)})
+            return
+
         self._send_json(200, result.payload)
 
     def _handle_project_lifecycle(self) -> None:

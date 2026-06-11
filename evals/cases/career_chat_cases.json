@@ -1,0 +1,39 @@
+[
+  {
+    "id": "career_agent_python_direction",
+    "input": {
+      "message": "我会 Python 和一点机器学习，想往 AI Agent 方向发展，但每天精力有限。",
+      "career_profile": {
+        "current_skills": ["Python", "机器学习基础"],
+        "development_intentions": ["希望发展到 AI Agent 方向"],
+        "personality_and_work_style": ["偏好项目驱动学习"],
+        "career_values_and_constraints": ["职业发展项目需要兼容有限精力"]
+      }
+    },
+    "expected": {
+      "must": ["agent_aligned", "deliverable", "profile_suggestion"]
+    }
+  },
+  {
+    "id": "career_empty_profile_first_step",
+    "input": {
+      "message": "我还没有整理技能和方向，只想先知道职业规划应该从哪里开始。",
+      "career_profile": {}
+    },
+    "expected": {
+      "must": ["conservative_profile_first", "deliverable"]
+    }
+  },
+  {
+    "id": "career_no_pure_learning",
+    "input": {
+      "message": "我不喜欢纯学习，希望做能留下作品的项目。",
+      "career_profile": {
+        "personality_and_work_style": ["不喜欢纯学习，偏好带交付物的成长任务"]
+      }
+    },
+    "expected": {
+      "must": ["deliverable", "not_pure_learning", "profile_suggestion"]
+    }
+  }
+]

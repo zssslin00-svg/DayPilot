@@ -197,9 +197,13 @@ def main() -> None:
                 'id="today-view"',
                 'id="history-view"',
                 'id="weekly-view"',
+                'id="career-view"',
                 'id="history-list"',
                 'id="weekly-feedback-form"',
                 'id="weekly-report-versions"',
+                'id="career-chat-form"',
+                'id="career-message-list"',
+                'id="career-profile-suggestions"',
                 'id="app-alert"',
                 'id="project-update-open"',
                 'id="project-modal"',
@@ -220,9 +224,37 @@ def main() -> None:
             for marker in [
                 "checkedInGoalIds",
                 "renderVisibleTodayGoalCards",
+                "handleCareerChatSubmit",
+                "careerCategoryLabel",
+                "elements.careerResults.hidden = !normalized.length",
                 "今天的项目都已 check-in",
             ]:
                 assert marker in frontend_js, f"frontend JS missing {marker}"
+
+            status, career_chat = _post_json(
+                f"{backend_base}/api/career-chat",
+                {
+                    "message": "我会 Python 和一点机器学习，想往 AI Agent 方向发展，应该做什么项目？",
+                    "available_minutes": 45,
+                },
+            )
+            assert status == 200
+            assert career_chat["session_id"] > 0
+            assert isinstance(career_chat["recommendations"], list)
+            assert career_chat["profile_update_suggestions"]
+            status, career_history = _get_json(
+                f"{backend_base}/api/career-chat/history?session_id={career_chat['session_id']}"
+            )
+            assert status == 200
+            assert len(career_history["messages"]) == 2
+            suggestion_id = career_history["pending_profile_update_suggestions"][0]["id"]
+            status, career_apply = _post_json(
+                f"{backend_base}/api/career-chat/profile-suggestion",
+                {"suggestion_id": suggestion_id, "decision": "apply"},
+            )
+            assert status == 200
+            assert career_apply["status"] == "applied"
+            assert career_apply["career_profile"]
 
             status, project_create = _post_json(
                 f"{backend_base}/api/projects/lifecycle",

@@ -6,6 +6,7 @@ from pathlib import Path
 os.environ["DAYPILOT_LLM_MODE"] = "mock"
 
 from evals.scripts import (
+    run_career_chat_evals,
     run_daily_goal_evals,
     run_difficulty_evals,
     run_feedback_revision_evals,
@@ -19,6 +20,7 @@ def run_all() -> list[dict]:
     summaries = [
         run_daily_goal_evals.run(),
         run_feedback_revision_evals.run(),
+        run_career_chat_evals.run(),
         run_weekly_report_evals.run(),
         run_difficulty_evals.run(),
         run_workday_policy_evals.run(),

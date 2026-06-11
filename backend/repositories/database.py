@@ -34,6 +34,7 @@ def initialize_database(
     _migrate_project_lifecycle_delete_action(connection)
     _migrate_project_scoped_daily_goals(connection)
     _migrate_project_checkins_completion_status(connection)
+    _migrate_career_planning_schema(connection)
     return connection
 
 
@@ -451,6 +452,15 @@ def _migrate_project_checkins_completion_status(connection: sqlite3.Connection) 
             connection.execute("CREATE INDEX IF NOT EXISTS idx_checkins_week ON daily_checkins(week_id, checkin_date)")
     finally:
         connection.execute("PRAGMA foreign_keys = ON")
+
+
+def _migrate_career_planning_schema(connection: sqlite3.Connection) -> None:
+    user_profile_columns = _table_columns(connection, "user_profile")
+    if "career_profile" not in user_profile_columns:
+        with connection:
+            connection.execute(
+                "ALTER TABLE user_profile ADD COLUMN career_profile TEXT NOT NULL DEFAULT '{}'"
+            )
 
 
 def _table_columns(connection: sqlite3.Connection, table: str) -> set[str]:

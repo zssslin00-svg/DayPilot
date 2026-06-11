@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -23,6 +24,8 @@ BACKEND_PID_FILE = STATE_DIR / "backend.pid"
 FRONTEND_PID_FILE = STATE_DIR / "frontend.pid"
 BACKEND_URL = "http://127.0.0.1:8000"
 FRONTEND_URL = "http://127.0.0.1:5173/pages/index.html"
+BACKEND_PORT = 8000
+FRONTEND_PORT = 5173
 LOCAL_OPENER = build_opener(ProxyHandler({}))
 
 
@@ -75,6 +78,8 @@ def validate_deepseek_key(
     from backend.config.settings import load_daypilot_settings
 
     settings = load_daypilot_settings(env=env, dotenv_path=Path(root) / ".env")
+    if settings.llm_mode == "mock":
+        return
     if not settings.deepseek_api_key:
         raise StartupError(
             "DEEPSEEK_API_KEY is missing. Set it in .env or the environment before starting DayPilot."
@@ -142,7 +147,7 @@ def start_services(
             stderr=backend_err,
         )
         frontend = subprocess.Popen(
-            [python_exe, "-u", "-m", "http.server", "5173", "-d", "frontend"],
+            [python_exe, "-u", "scripts/serve_frontend.py"],
             cwd=base,
             stdout=frontend_out,
             stderr=frontend_err,
@@ -158,12 +163,13 @@ def start_services(
 
     try:
         wait_for_backend_health()
+        wait_for_frontend()
     except Exception:
         stop_started_processes((backend, frontend))
         raise
 
     if open_browser:
-        webbrowser.open(FRONTEND_URL)
+        webbrowser.open(f"{FRONTEND_URL}?v={int(time.time())}")
 
     return backend, frontend
 
@@ -186,6 +192,24 @@ def wait_for_backend_health(timeout_seconds: float = 15.0) -> None:
     raise StartupError(message)
 
 
+def wait_for_frontend(timeout_seconds: float = 8.0) -> None:
+    deadline = time.time() + timeout_seconds
+    last_error: Exception | None = None
+    while time.time() < deadline:
+        try:
+            with LOCAL_OPENER.open(FRONTEND_URL, timeout=2) as response:
+                if response.status == 200:
+                    return
+        except (OSError, URLError) as exc:
+            last_error = exc
+        time.sleep(0.25)
+
+    message = f"Frontend health check failed at {FRONTEND_URL}."
+    if last_error is not None:
+        message = f"{message} Last error: {last_error}"
+    raise StartupError(message)
+
+
 def stop_started_processes(processes: tuple[subprocess.Popen[bytes], subprocess.Popen[bytes]]) -> None:
     for process in processes:
         if process.poll() is None:
@@ -197,8 +221,129 @@ def stop_started_processes(processes: tuple[subprocess.Popen[bytes], subprocess.
             process.kill()
 
 
+def stop_existing_daypilot_services(root: str | Path = ROOT) -> int:
+    paths = runtime_paths(root)
+    paths.state_dir.mkdir(parents=True, exist_ok=True)
+    pid_file_pids = _read_pid_file_pids(paths)
+    port_pids = set(_listening_pids_for_ports((BACKEND_PORT, FRONTEND_PORT)))
+    candidate_pids = (pid_file_pids | port_pids) - {os.getpid()}
+    stopped = 0
+
+    for pid in sorted(candidate_pids):
+        command_line = _command_line_for_pid(pid)
+        if pid not in pid_file_pids and not _looks_like_daypilot_process(command_line):
+            continue
+        if pid in pid_file_pids and command_line and not _looks_like_daypilot_process(command_line):
+            continue
+        if _stop_pid(pid):
+            stopped += 1
+
+    paths.backend_pid_file.unlink(missing_ok=True)
+    paths.frontend_pid_file.unlink(missing_ok=True)
+    _wait_for_ports_available((BACKEND_PORT, FRONTEND_PORT))
+    return stopped
+
+
+def _read_pid_file_pids(paths: RuntimePaths) -> set[int]:
+    pids: set[int] = set()
+    for path in (paths.backend_pid_file, paths.frontend_pid_file):
+        try:
+            pids.add(int(path.read_text(encoding="ascii").strip()))
+        except (FileNotFoundError, ValueError):
+            path.unlink(missing_ok=True)
+    return pids
+
+
+def _listening_pids_for_ports(ports: tuple[int, ...]) -> list[int]:
+    result = subprocess.run(
+        ["netstat", "-ano", "-p", "tcp"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        encoding="utf-8",
+        errors="ignore",
+        check=False,
+    )
+    pids: list[int] = []
+    wanted = {f":{port}" for port in ports}
+    for raw_line in result.stdout.splitlines():
+        parts = raw_line.split()
+        if len(parts) < 5 or parts[0].upper() != "TCP":
+            continue
+        local_address = parts[1]
+        state = parts[-2].upper()
+        if state != "LISTENING" or not any(local_address.endswith(suffix) for suffix in wanted):
+            continue
+        try:
+            pids.append(int(parts[-1]))
+        except ValueError:
+            continue
+    return pids
+
+
+def _command_line_for_pid(pid: int) -> str:
+    if os.name != "nt":
+        return ""
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            f"(Get-CimInstance Win32_Process -Filter 'ProcessId = {pid}').CommandLine",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        encoding="utf-8",
+        errors="ignore",
+        check=False,
+    )
+    return result.stdout.strip()
+
+
+def _looks_like_daypilot_process(command_line: str) -> bool:
+    normalized = command_line.replace("\\", "/").lower()
+    if "backend/api/server.py" in normalized:
+        return True
+    if "scripts/serve_frontend.py" in normalized:
+        return True
+    return "http.server" in normalized and "5173" in normalized and "frontend" in normalized
+
+
+def _stop_pid(pid: int) -> bool:
+    try:
+        if os.name == "nt":
+            result = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            return result.returncode == 0
+        os.kill(pid, signal.SIGTERM)
+        return True
+    except OSError:
+        return False
+
+
+def _wait_for_ports_available(ports: tuple[int, ...], timeout_seconds: float = 8.0) -> None:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        remaining = _listening_pids_for_ports(ports)
+        if not remaining:
+            return
+        time.sleep(0.25)
+    remaining = sorted(set(_listening_pids_for_ports(ports)))
+    raise StartupError(f"Ports 8000/5173 are still in use by process ids: {remaining}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Start DayPilot backend and frontend.")
+    parser.add_argument(
+        "--restart",
+        action="store_true",
+        help="Stop existing DayPilot backend/frontend processes on ports 8000/5173 before starting.",
+    )
     parser.add_argument(
         "--no-browser",
         action="store_true",
@@ -211,6 +356,9 @@ def main() -> None:
     args = parse_args()
     try:
         ensure_python_version()
+        if args.restart:
+            stopped_count = stop_existing_daypilot_services(ROOT)
+            print(f"Stopped existing DayPilot processes: {stopped_count}")
         backup_path = prepare_runtime(ROOT)
         if backup_path is None:
             print("No existing database found; initialized a fresh DayPilot database.")

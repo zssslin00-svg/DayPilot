@@ -25,6 +25,7 @@ def test_start_stop_scripts_are_portable_and_keep_state_under_data_tmp() -> None
     script_paths = [
         ROOT / "scripts" / "start_daypilot.py",
         ROOT / "scripts" / "stop_daypilot.py",
+        ROOT / "scripts" / "serve_frontend.py",
         ROOT / "scripts" / "start_daypilot.bat",
         ROOT / "scripts" / "stop_daypilot.bat",
         ROOT / "scripts" / "restore_latest_db.bat",
@@ -52,6 +53,14 @@ def test_start_script_fails_fast_without_deepseek_key() -> None:
             assert "DEEPSEEK_API_KEY is missing" in str(exc)
         else:
             raise AssertionError("startup should fail when DEEPSEEK_API_KEY is missing")
+
+
+def test_start_script_allows_mock_without_deepseek_key() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        (root / ".env").write_text("DAYPILOT_LLM_MODE=mock\nDEEPSEEK_API_KEY=\n", encoding="utf-8")
+
+        validate_deepseek_key(root, env={})
 
 
 def test_start_script_initializes_database_when_missing() -> None:
@@ -154,6 +163,7 @@ def test_restore_script_restores_latest_backup_and_protects_current_db() -> None
 def main() -> None:
     test_start_stop_scripts_are_portable_and_keep_state_under_data_tmp()
     test_start_script_fails_fast_without_deepseek_key()
+    test_start_script_allows_mock_without_deepseek_key()
     test_start_script_initializes_database_when_missing()
     test_start_script_backs_up_existing_database_before_runtime_preparation()
     test_stop_script_removes_stale_pid_files_under_data_tmp()

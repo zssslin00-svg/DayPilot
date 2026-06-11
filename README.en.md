@@ -42,6 +42,8 @@ By default, data stays on your machine: the SQLite database, LLM logs, backups, 
 
 **Feedback revision**: On the Today page, enter feedback like "I only have 45 minutes today", "this is too large", or "I want to write code", and DayPilot will generate a new goal version.
 
+**Career planning chat**: In the **Career Planning** tab, talk to a private career-development planning assistant. It reads `SOUL.md`, the structured user profile, project history, ability state, and recent records to help decide what to do with spare time and how to build transferable skills and portfolio evidence.
+
 **Long-term memory**: When feedback reveals a stable preference, such as "do not give me pure learning goals" or "each goal must leave an inspectable output", the system writes it to the database and syncs it into the user profile section of `SOUL.md`.
 
 **Project updates**: Add projects, mark projects complete, and update project status in natural language. The system keeps the current project list in sync.
@@ -57,7 +59,8 @@ DayPilot needs to know who you are, what you are working on, and how you like to
 | Entry | Where to enter it | What to enter | How the system uses it |
 | --- | --- | --- | --- |
 | DeepSeek config | `.env` | `DEEPSEEK_API_KEY`, model, and timeout settings | The API key must exist at startup. The real LLM path uses it to generate goals, interpret feedback, and generate weekly reports. |
-| Stable personal profile | `SOUL.md`, copied from `SOUL.example.md` | Long-term direction, current project boundaries, user preferences, avoid rules, time budget, and goal-generation principles | Read on every agent call as long-term context. Good for stable information, not for temporary same-day details. |
+| Stable personal profile | `SOUL.md`, copied from `SOUL.example.md` | Long-term direction, current skills, personality and work style, development intentions, career values and constraints, current project boundaries, user preferences, avoid rules, time budget, and goal-generation principles | Read on every agent call as long-term context. Good for stable information, not for temporary same-day details. |
+| Career planning chat | Left-side **Career Planning** in the web app | Spare time, career questions, desired direction, current skills, and personality notes | Gives direction analysis, clarifying questions, project suggestions, risks, and next actions. New profile facts become pending suggestions first, then are written to SQLite and `SOUL.md` only after user confirmation. |
 | Project changes | Left-side **Project Update** in the web app | "Add project: ... current progress: ... goal: ...", or "this project is complete; the result is ..." | Written to the SQLite project table and reflected in the current-project section of `SOUL.md`. |
 | Today's preference or constraint | Today page **Feedback Revision** | "I only have 30 minutes today", "this goal is too large", "I want to do experiments", or "do not give abstract goals later" | First revises today's goal. If it is a stable preference or avoid pattern, it becomes long-term memory. |
 | End-of-day facts | Today page **Check-in** | Completion status, completion notes, felt difficulty, and tomorrow's direction | Used as history, project-progress evidence, weekly-report evidence, and the handoff into the next day's goal. |
@@ -73,6 +76,22 @@ What capability I want to build over time, or what direction I want this project
 ## Current Projects
 
 1. Project name: current stage, recent blockers, and what I hope to advance today.
+
+## Current Skills
+
+- Python / frontend / backend / data analysis / LLM applications, with evidence.
+
+## Personality And Work Style
+
+- I work best with project-driven learning and plans that leave an output.
+
+## Development Intentions
+
+- Directions I want to deepen, fields I may move toward, and portfolio work I want to build.
+
+## Career Values And Constraints
+
+- I care about long-term compounding, real available time, energy boundaries, and visible deliverables.
 
 ## User Preferences
 
@@ -118,6 +137,13 @@ python scripts\start_daypilot.py
 
 If Windows says `python` is unavailable but Python Launcher is installed, replace the last line with `py -3 scripts\start_daypilot.py`. You can also run `scripts\start_daypilot.bat`; it will automatically try both entry points.
 
+For local mock debugging, you do not need a real DeepSeek key. During development, prefer `--restart`; it stops old DayPilot backend/frontend processes, backs up and restarts services, serves frontend files with no-cache headers, and opens a timestamped page:
+
+```bat
+cd /d D:\path\to\DayPilot
+set "DAYPILOT_LLM_MODE=mock" && python scripts\start_daypilot.py --restart
+```
+
 ### macOS / Linux
 
 ```bash
@@ -138,7 +164,7 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-pro
 ```
 
-The startup script automatically checks `DEEPSEEK_API_KEY`, backs up an existing database, initializes SQLite on first run, starts the backend at `http://127.0.0.1:8000`, starts the frontend at `http://127.0.0.1:5173/pages/index.html`, and opens the browser.
+The startup script automatically checks `DEEPSEEK_API_KEY` in real LLM mode, backs up an existing database, initializes SQLite on first run, starts the backend at `http://127.0.0.1:8000`, starts the frontend at `http://127.0.0.1:5173/pages/index.html`, and opens the browser. With `--restart`, it stops old DayPilot processes first to avoid occupied ports, stale static assets, or duplicate services showing an outdated page.
 
 Stop services:
 
@@ -162,7 +188,7 @@ python scripts\check_deepseek_connection.py
 
 ```text
 backend/api/             HTTP API entry, based on the Python standard library
-backend/services/        Daily goal, feedback revision, project progress, weekly report, SOUL sync
+backend/services/        Daily goal, feedback revision, project progress, weekly report, career chat, SOUL sync
 backend/repositories/    SQLite read/write wrappers
 backend/schemas/         Agent structured-output JSON Schema
 frontend/pages/          Single-page workbench HTML
@@ -180,8 +206,9 @@ Core data flow:
 1. `SOUL.md`, the SQLite user profile, project list, and history records form the context.
 2. The service layer calls the DeepSeek OpenAI-compatible Chat Completions API and asks for JSON.
 3. JSON is written to SQLite after schema validation, normalization, and quality checks.
-4. The frontend reads the API and displays Today, History, Weekly, and Project Update.
+4. The frontend reads the API and displays Today, History, Weekly, Project Update, and Career Chat.
 5. If `SOUL.md` sync fails, the failed task enters the SQLite retry queue and the background maintenance loop retries it.
+6. Career chat only saves sessions and messages. Profile updates become pending suggestions first, and are merged into `user_profile.career_profile` and synced to `SOUL.md` only after user confirmation.
 
 ## Tech Stack
 
@@ -192,7 +219,7 @@ Core data flow:
 | Agent runtime | DeepSeek OpenAI-compatible Chat Completions API |
 | Fallback | Deterministic mock adapters for tests and failure fallback |
 | Database | SQLite |
-| Local service | Python `http.server` static frontend + Python backend |
+| Local service | `scripts/serve_frontend.py` no-cache static frontend + Python backend |
 | Tests | Self-contained Python test scripts + eval cases/rubrics |
 
 ## Platform Support
@@ -242,6 +269,15 @@ Windows can also use:
 scripts\restore_latest_db.bat
 ```
 
+## Current Data Model And Sync Rules
+
+- The current project state is canonical in `projects.project_state`; compatibility fields such as `status_summary` and `planning_bias` are derived from that JSON state for API responses.
+- `project_state` stores project summaries, planning guidance, targets, facts, and recent update sources. Project updates, check-in progress, and migration logic write to this canonical state so old historical fields do not overwrite current project intent.
+- Changes to project names, summaries, planning guidance, targets, or priority can refresh the corresponding daily goal for the current day.
+- The History view shows the current active goal version for each `daily_goal`; older versions remain in the version chain for audit.
+- Structured career profile data is stored in `user_profile.career_profile`. Career chat stores `career_chat_sessions` and `career_chat_messages`, but it does not automatically create projects, refresh today's goal, or write check-ins.
+- New skills, personality traits, development intentions, preferences, or constraints discovered during chat are saved first as `career_profile_update_suggestions` with `pending` status. Only after user confirmation does the system merge them into SQLite and sync the `Current Skills`, `Personality And Work Style`, `Development Intentions`, and `Career Values And Constraints` sections of `SOUL.md`; dismissed suggestions do not change the profile.
+
 ## API Surface
 
 - `GET /health`
@@ -254,6 +290,10 @@ scripts\restore_latest_db.bat
 - `POST /api/projects/lifecycle`
 - `POST /api/weekly-report/generate`
 - `POST /api/weekly-report/feedback`
+- `POST /api/career-chat`
+- `GET /api/career-chat/sessions`
+- `GET /api/career-chat/history?session_id=...`
+- `POST /api/career-chat/profile-suggestion`
 - `GET /api/soul-sync/status`
 - `POST /api/soul-sync/retry`
 
@@ -263,6 +303,8 @@ scripts\restore_latest_db.bat
 - `data/db/`, `data/backups/`, `data/tmp/`, and `data/llm_logs/` are ignored by default.
 - LLM logs do not write API keys or Authorization headers.
 - The startup script backs up an existing SQLite database before starting services.
+- Career chat may send chat content to the configured DeepSeek endpoint; with `DAYPILOT_LLM_MODE=mock`, it uses the local deterministic fallback instead.
+- The assistant never silently rewrites your career profile. SQLite and `SOUL.md` change only after you confirm the "information to save to profile" in the frontend.
 - Before uploading to GitHub, do not commit personal databases, LLM logs, or the private `SOUL.md`; the repository keeps only `SOUL.example.md`.
 
 ## License

@@ -27,6 +27,9 @@ CORE_TABLES = {
     "ability_state",
     "weekly_reports",
     "weekly_focus",
+    "career_chat_sessions",
+    "career_chat_messages",
+    "career_profile_update_suggestions",
 }
 
 
@@ -57,6 +60,12 @@ def test_schema_and_repository_crud() -> None:
                 )
                 assert profile_id == 1
                 assert repo.get_user_profile(connection)["current_focus_projects"] == ["DayPilot"]
+                repo.update_user_profile(
+                    connection,
+                    profile_id,
+                    career_profile={"current_skills": ["Python"], "development_intentions": ["AI Agent"]},
+                )
+                assert repo.get_user_profile(connection)["career_profile"]["current_skills"] == ["Python"]
 
                 daily_goal_id = repo.create_daily_goal(
                     connection,
@@ -176,6 +185,60 @@ def test_schema_and_repository_crud() -> None:
                 assert repo.get_current_ability_state(connection)["id"] == second_state_id
                 repo.update_ability_state(connection, first_state_id, is_current=1)
                 assert repo.get_current_ability_state(connection)["id"] == first_state_id
+
+                career_session_id = repo.create_career_chat_session(
+                    connection,
+                    title="Career planning",
+                )
+                user_message_id = repo.create_career_chat_message(
+                    connection,
+                    session_id=career_session_id,
+                    role="user",
+                    content="I know Python and want to build AI Agent skills.",
+                    context_snapshot={"source": "test"},
+                )
+                assert repo.get_career_chat_message(connection, user_message_id)["role"] == "user"
+                assistant_message_id = repo.create_career_chat_message(
+                    connection,
+                    session_id=career_session_id,
+                    role="assistant",
+                    content="Build a small Agent evaluation project.",
+                    recommendations=[
+                        {
+                            "title": "Agent eval mini project",
+                            "deliverable": "A runnable evaluation note.",
+                        }
+                    ],
+                    profile_update_suggestions=[
+                        {
+                            "category": "current_skills",
+                            "items": ["Python"],
+                        }
+                    ],
+                    context_snapshot={"source": "test"},
+                    llm_metadata={"provider": "mock"},
+                )
+                suggestion_id = repo.create_career_profile_update_suggestion(
+                    connection,
+                    session_id=career_session_id,
+                    message_id=assistant_message_id,
+                    category="current_skills",
+                    suggestion_payload={
+                        "category": "current_skills",
+                        "items": ["Python"],
+                        "evidence": "User said Python.",
+                        "reason": "Skill should inform recommendations.",
+                    },
+                )
+                assert len(repo.list_career_chat_sessions(connection)) == 1
+                assert len(repo.list_career_chat_messages(connection, career_session_id)) == 2
+                assert repo.get_career_profile_update_suggestion(connection, suggestion_id)["status"] == "pending"
+                repo.update_career_profile_update_suggestion(
+                    connection,
+                    suggestion_id,
+                    status="dismissed",
+                )
+                assert repo.list_pending_career_profile_update_suggestions(connection) == []
 
                 retry_job_id = repo.create_soul_sync_retry_job(
                     connection,

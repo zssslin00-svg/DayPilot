@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://daypilot.local/schemas/career_chat_response.schema.json",
+  "title": "DayPilotCareerChatResponse",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "assistant_message",
+    "recommendations",
+    "profile_update_suggestions"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "career_chat_response.v1"
+    },
+    "assistant_message": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 1600
+    },
+    "recommendations": {
+      "type": "array",
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "why_it_fits",
+          "skills_to_build",
+          "estimated_time",
+          "deliverable",
+          "first_step",
+          "risks",
+          "not_now_reason"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 90
+          },
+          "why_it_fits": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 260
+          },
+          "skills_to_build": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6,
+            "items": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 60
+            }
+          },
+          "estimated_time": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          },
+          "deliverable": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 160
+          },
+          "first_step": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 180
+          },
+          "risks": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 220
+          },
+          "not_now_reason": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 220
+          }
+        }
+      }
+    },
+    "profile_update_suggestions": {
+      "type": "array",
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "category",
+          "items",
+          "evidence",
+          "reason"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "current_skills",
+              "personality_and_work_style",
+              "development_intentions",
+              "career_values_and_constraints"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 120
+            }
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 260
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 260
+          }
+        }
+      }
+    }
+  }
+}

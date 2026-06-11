@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS user_profile (
   current_focus_projects TEXT NOT NULL DEFAULT '[]',
   goal_preferences TEXT NOT NULL DEFAULT '{}',
   avoid_patterns TEXT NOT NULL DEFAULT '[]',
+  career_profile TEXT NOT NULL DEFAULT '{}',
   default_available_minutes INTEGER NOT NULL DEFAULT 90
     CHECK (default_available_minutes BETWEEN 15 AND 360),
   timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
@@ -348,3 +349,53 @@ CREATE INDEX IF NOT EXISTS idx_weekly_report_versions_report
   ON weekly_report_versions(weekly_report_id, version_no);
 CREATE INDEX IF NOT EXISTS idx_weekly_focus_target_status
   ON weekly_focus(target_week_id, status, priority);
+
+CREATE TABLE IF NOT EXISTS career_chat_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active', 'archived')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS career_chat_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+  content TEXT NOT NULL,
+  recommendations TEXT NOT NULL DEFAULT '[]',
+  profile_update_suggestions TEXT NOT NULL DEFAULT '[]',
+  context_snapshot TEXT NOT NULL DEFAULT '{}',
+  llm_metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (session_id) REFERENCES career_chat_sessions(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS career_profile_update_suggestions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL,
+  message_id INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'applied', 'dismissed')),
+  category TEXT NOT NULL
+    CHECK (category IN (
+      'current_skills',
+      'personality_and_work_style',
+      'development_intentions',
+      'career_values_and_constraints'
+    )),
+  suggestion_payload TEXT NOT NULL DEFAULT '{}',
+  applied_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (session_id) REFERENCES career_chat_sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY (message_id) REFERENCES career_chat_messages(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_career_chat_sessions_updated
+  ON career_chat_sessions(status, updated_at, id);
+CREATE INDEX IF NOT EXISTS idx_career_chat_messages_session
+  ON career_chat_messages(session_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_career_profile_suggestions_status
+  ON career_profile_update_suggestions(status, session_id, id);

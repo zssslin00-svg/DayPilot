@@ -19,6 +19,7 @@ TABLE_COLUMNS: dict[str, set[str]] = {
         "current_focus_projects",
         "goal_preferences",
         "avoid_patterns",
+        "career_profile",
         "default_available_minutes",
         "timezone",
         "workday_rule",
@@ -252,6 +253,35 @@ TABLE_COLUMNS: dict[str, set[str]] = {
         "created_at",
         "updated_at",
     },
+    "career_chat_sessions": {
+        "id",
+        "title",
+        "status",
+        "created_at",
+        "updated_at",
+    },
+    "career_chat_messages": {
+        "id",
+        "session_id",
+        "role",
+        "content",
+        "recommendations",
+        "profile_update_suggestions",
+        "context_snapshot",
+        "llm_metadata",
+        "created_at",
+    },
+    "career_profile_update_suggestions": {
+        "id",
+        "session_id",
+        "message_id",
+        "status",
+        "category",
+        "suggestion_payload",
+        "applied_at",
+        "created_at",
+        "updated_at",
+    },
 }
 
 JSON_FIELDS: dict[str, set[str]] = {
@@ -259,6 +289,7 @@ JSON_FIELDS: dict[str, set[str]] = {
         "current_focus_projects",
         "goal_preferences",
         "avoid_patterns",
+        "career_profile",
         "workday_rule",
     },
     "projects": {"project_state"},
@@ -298,6 +329,13 @@ JSON_FIELDS: dict[str, set[str]] = {
     "weekly_reports": {"source_snapshot"},
     "weekly_report_versions": {"source_snapshot", "llm_metadata"},
     "weekly_focus": {"context_payload"},
+    "career_chat_messages": {
+        "recommendations",
+        "profile_update_suggestions",
+        "context_snapshot",
+        "llm_metadata",
+    },
+    "career_profile_update_suggestions": {"suggestion_payload"},
 }
 
 UPDATED_AT_TABLES = {
@@ -308,6 +346,8 @@ UPDATED_AT_TABLES = {
     "soul_sync_retry_jobs",
     "weekly_reports",
     "weekly_focus",
+    "career_chat_sessions",
+    "career_profile_update_suggestions",
 }
 
 PROJECT_STATE_SCHEMA_VERSION = "project_state.v1"
@@ -994,6 +1034,143 @@ def list_recent_profile_memory_events(
         LIMIT ?
         """,
         (limit,),
+    )
+
+
+def create_career_chat_session(connection: sqlite3.Connection, **session: Any) -> int:
+    return _insert(connection, "career_chat_sessions", session)
+
+
+def get_career_chat_session(connection: sqlite3.Connection, session_id: int) -> Record | None:
+    return _fetch_by_id(connection, "career_chat_sessions", session_id)
+
+
+def update_career_chat_session(connection: sqlite3.Connection, session_id: int, **changes: Any) -> Record | None:
+    return _update(connection, "career_chat_sessions", session_id, changes)
+
+
+def list_career_chat_sessions(
+    connection: sqlite3.Connection,
+    *,
+    include_archived: bool = False,
+    limit: int = 20,
+) -> list[Record]:
+    where = "" if include_archived else "WHERE status = 'active'"
+    return _fetch_all(
+        connection,
+        "career_chat_sessions",
+        f"""
+        SELECT *
+        FROM career_chat_sessions
+        {where}
+        ORDER BY updated_at DESC, id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+
+
+def create_career_chat_message(connection: sqlite3.Connection, **message: Any) -> int:
+    message_id = _insert(connection, "career_chat_messages", message)
+    update_career_chat_session(connection, int(message["session_id"]), updated_at=_now_text())
+    return message_id
+
+
+def get_career_chat_message(connection: sqlite3.Connection, message_id: int) -> Record | None:
+    return _fetch_by_id(connection, "career_chat_messages", message_id)
+
+
+def list_career_chat_messages(connection: sqlite3.Connection, session_id: int) -> list[Record]:
+    return _fetch_all(
+        connection,
+        "career_chat_messages",
+        """
+        SELECT *
+        FROM career_chat_messages
+        WHERE session_id = ?
+        ORDER BY created_at, id
+        """,
+        (session_id,),
+    )
+
+
+def list_recent_career_chat_messages(
+    connection: sqlite3.Connection,
+    session_id: int,
+    *,
+    limit: int = 12,
+) -> list[Record]:
+    rows = _fetch_all(
+        connection,
+        "career_chat_messages",
+        """
+        SELECT *
+        FROM career_chat_messages
+        WHERE session_id = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+        """,
+        (session_id, limit),
+    )
+    return list(reversed(rows))
+
+
+def create_career_profile_update_suggestion(connection: sqlite3.Connection, **suggestion: Any) -> int:
+    return _insert(connection, "career_profile_update_suggestions", suggestion)
+
+
+def get_career_profile_update_suggestion(connection: sqlite3.Connection, suggestion_id: int) -> Record | None:
+    return _fetch_by_id(connection, "career_profile_update_suggestions", suggestion_id)
+
+
+def update_career_profile_update_suggestion(
+    connection: sqlite3.Connection,
+    suggestion_id: int,
+    **changes: Any,
+) -> Record | None:
+    return _update(connection, "career_profile_update_suggestions", suggestion_id, changes)
+
+
+def list_career_profile_update_suggestions_for_message(
+    connection: sqlite3.Connection,
+    message_id: int,
+) -> list[Record]:
+    return _fetch_all(
+        connection,
+        "career_profile_update_suggestions",
+        """
+        SELECT *
+        FROM career_profile_update_suggestions
+        WHERE message_id = ?
+        ORDER BY id
+        """,
+        (message_id,),
+    )
+
+
+def list_pending_career_profile_update_suggestions(
+    connection: sqlite3.Connection,
+    *,
+    session_id: int | None = None,
+    limit: int = 20,
+) -> list[Record]:
+    params: list[Any] = []
+    where = "status = 'pending'"
+    if session_id is not None:
+        where += " AND session_id = ?"
+        params.append(session_id)
+    params.append(limit)
+    return _fetch_all(
+        connection,
+        "career_profile_update_suggestions",
+        f"""
+        SELECT *
+        FROM career_profile_update_suggestions
+        WHERE {where}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+        """,
+        params,
     )
 
 

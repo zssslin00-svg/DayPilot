@@ -548,7 +548,8 @@ li + li {
 }
 
 textarea,
-select {
+select,
+input {
   width: 100%;
   min-width: 0;
   border: 1px solid rgba(63, 66, 70, 0.2);
@@ -563,13 +564,15 @@ textarea {
   line-height: 1.55;
 }
 
-select {
+select,
+input {
   min-height: 40px;
   padding: 0 10px;
 }
 
 textarea:focus,
 select:focus,
+input:focus,
 button:focus-visible {
   outline: 3px solid rgba(47, 111, 159, 0.22);
   outline-offset: 2px;
@@ -801,6 +804,141 @@ button:focus-visible {
   margin-top: 0;
 }
 
+.career-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  gap: 15px;
+  align-items: start;
+}
+
+.career-session-panel,
+.career-chat-panel,
+.career-results,
+.career-profile-suggestions,
+.career-recommendation-card,
+.career-suggestion-card {
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 8px 20px rgba(48, 52, 58, 0.055);
+}
+
+.career-session-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.career-session-list {
+  display: grid;
+  gap: 8px;
+}
+
+.career-session-button {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 52px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: rgba(255, 253, 246, 0.56);
+  color: var(--ink);
+  text-align: left;
+}
+
+.career-session-button.active {
+  border-color: rgba(47, 111, 159, 0.28);
+  background: rgba(47, 111, 159, 0.09);
+  color: var(--blue);
+}
+
+.career-session-button span {
+  color: var(--soft-ink);
+  font-size: 0.8rem;
+}
+
+.career-chat-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.career-message-list {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.career-message {
+  display: grid;
+  gap: 5px;
+  max-width: 86%;
+  padding: 11px 13px;
+  border-radius: 8px;
+  background: rgba(255, 250, 239, 0.62);
+}
+
+.career-message.user {
+  justify-self: end;
+  background: rgba(47, 111, 159, 0.09);
+}
+
+.career-message p {
+  margin: 0;
+}
+
+.career-form {
+  box-shadow: none;
+  background: rgba(255, 252, 244, 0.42);
+}
+
+.career-results,
+.career-profile-suggestions {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.career-recommendations,
+.career-suggestion-list {
+  display: grid;
+  gap: 12px;
+}
+
+.career-recommendation-card,
+.career-suggestion-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  background: rgba(255, 253, 246, 0.62);
+  box-shadow: none;
+}
+
+.career-recommendation-card h5,
+.career-meta-block h5 {
+  margin: 0;
+  color: var(--soft-ink);
+  font-size: 0.84rem;
+}
+
+.career-meta-block {
+  display: grid;
+  gap: 4px;
+}
+
+.career-meta-block p {
+  margin: 0;
+}
+
+.career-suggestion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 [hidden] {
   display: none !important;
 }
@@ -819,7 +957,7 @@ button:focus-visible {
   }
 
   .tabs {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .tab-button {
@@ -872,5 +1010,13 @@ button:focus-visible {
 
   .project-columns {
     grid-template-columns: 1fr;
+  }
+
+  .career-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .career-message {
+    max-width: 100%;
   }
 }

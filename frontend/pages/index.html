@@ -27,6 +27,10 @@
             <span class="nav-icon" aria-hidden="true">⌁</span>
             <span>周报</span>
           </button>
+          <button id="tab-career" class="tab-button" type="button" data-view="career-view">
+            <span class="nav-icon" aria-hidden="true">✦</span>
+            <span>职业规划</span>
+          </button>
         </nav>
         <button id="project-update-open" class="text-button secondary sidebar-action" type="button">
           项目更新
@@ -173,6 +177,56 @@
             <h3>周报版本</h3>
             <div class="version-list" id="weekly-report-versions"></div>
           </section>
+        </section>
+
+        <section class="panel view-panel" id="career-view" aria-labelledby="career-title" hidden>
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Career</p>
+              <h2 id="career-title">私人职业发展规划</h2>
+            </div>
+            <button class="text-button secondary" id="career-new-session" type="button">新会话</button>
+          </div>
+
+          <div class="career-layout">
+            <aside class="career-session-panel" aria-label="职业规划会话">
+              <h3>本地会话</h3>
+              <div class="career-session-list" id="career-session-list"></div>
+            </aside>
+
+            <section class="career-chat-panel" aria-label="职业规划聊天">
+              <div class="career-message-list" id="career-message-list" aria-live="polite"></div>
+
+              <form class="work-form career-form" id="career-chat-form">
+                <label>
+                  <span>想讨论的职业问题</span>
+                  <textarea
+                    id="career-chat-message"
+                    name="message"
+                    rows="4"
+                    placeholder="例如：我会 Python 和一点机器学习，想往 AI Agent 方向发展，但精力有限，应该做什么项目？"
+                    required
+                  ></textarea>
+                </label>
+                <label>
+                  <span>今天可投入分钟数（可空）</span>
+                  <input id="career-available-minutes" name="available_minutes" type="number" min="15" max="720" />
+                </label>
+                <button class="text-button" id="career-chat-submit" type="submit">发送</button>
+              </form>
+
+              <section class="career-results" id="career-results" hidden>
+                <h3>项目建议</h3>
+                <div class="career-recommendations" id="career-recommendations"></div>
+              </section>
+
+              <section class="career-profile-suggestions" id="career-profile-suggestions" hidden>
+                <h3>待确认画像信息</h3>
+                <p class="muted compact">这些信息不会自动保存；确认后才会写入本地画像和 SOUL.md。</p>
+                <div class="career-suggestion-list" id="career-suggestion-list"></div>
+              </section>
+            </section>
+          </div>
         </section>
       </main>
     </div>
