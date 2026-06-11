@@ -125,13 +125,13 @@ class MockCareerPlanningAdapter:
                     "category": "development_intentions",
                     "items": ["希望通过项目驱动方式形成可迁移的职业能力"],
                     "evidence": "画像较空，且用户正在使用职业规划助手补全发展方向。",
-                    "reason": "这是低风险的初始发展意愿，确认后可帮助后续建议更贴合。",
+                    "reason": "这是低风险的初始发展意愿，保存后可帮助后续建议更贴合。",
                 }
             ]
 
         assistant_message = (
             "我会先把职业规划压成可验证的小项目，而不是直接给宏大路线。"
-            "下面这些建议都以你的画像、当前项目和可交付偏好为依据；画像更新项需要你确认后才保存。"
+            "下面这些建议都以你的画像、当前项目和可交付偏好为依据；我会自动沉淀明确、稳定的画像线索。"
         )
         return {
             "schema_version": "career_chat_response.v1",
@@ -211,23 +211,23 @@ def send_career_chat_message(
                 context_snapshot=_context_snapshot(context),
                 llm_metadata=llm_result.metadata,
             )
-            suggestion_records = []
-            for suggestion in output["profile_update_suggestions"]:
-                suggestion_id = repo.create_career_profile_update_suggestion(
-                    connection,
-                    session_id=session_id,
-                    message_id=assistant_message_id,
-                    category=suggestion["category"],
-                    suggestion_payload=suggestion,
-                )
-                record = repo.get_career_profile_update_suggestion(connection, suggestion_id)
-                if record is not None:
-                    suggestion_records.append(_public_suggestion(record))
+            suggestion_records = _create_and_apply_profile_suggestions(
+                connection,
+                session_id=session_id,
+                message_id=assistant_message_id,
+                suggestions=output["profile_update_suggestions"],
+            )
             assistant_message = repo.get_career_chat_message(connection, assistant_message_id)
             user_message = repo.get_career_chat_message(connection, user_message_id)
             session = repo.get_career_chat_session(connection, session_id)
     finally:
         connection.close()
+
+    career_profile_update = _sync_auto_applied_career_profile(
+        db_path,
+        applied_suggestion_count=len(suggestion_records),
+        soul_path=soul_path,
+    )
 
     if assistant_message is None or user_message is None or session is None:
         raise CareerChatGenerationError("career_chat_persistence_failed")
@@ -239,6 +239,7 @@ def send_career_chat_message(
             "assistant_message": assistant_message,
             "recommendations": output["recommendations"],
             "profile_update_suggestions": suggestion_records,
+            "career_profile_update": career_profile_update,
             "llm_metadata": llm_result.metadata,
         }
     )
@@ -250,6 +251,82 @@ def get_career_chat_sessions(db_path: str | Path = DEFAULT_DB_PATH) -> dict[str,
         return {"sessions": repo.list_career_chat_sessions(connection, limit=30)}
     finally:
         connection.close()
+
+
+def _create_and_apply_profile_suggestions(
+    connection,
+    *,
+    session_id: int,
+    message_id: int,
+    suggestions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not suggestions:
+        return []
+    profile = repo.get_user_profile(connection)
+    if profile is None:
+        raise CareerChatGenerationError("user_profile_not_found")
+
+    next_profile = dict(profile.get("career_profile") or {})
+    suggestion_records = []
+    for suggestion in suggestions:
+        suggestion_id = repo.create_career_profile_update_suggestion(
+            connection,
+            session_id=session_id,
+            message_id=message_id,
+            status="applied",
+            category=suggestion["category"],
+            suggestion_payload=suggestion,
+            applied_at=_now_text(),
+        )
+        next_profile = _merge_career_profile(
+            next_profile,
+            suggestion,
+            suggestion_id=suggestion_id,
+        )
+        record = repo.get_career_profile_update_suggestion(connection, suggestion_id)
+        if record is not None:
+            suggestion_records.append(_public_suggestion(record))
+
+    repo.update_user_profile(
+        connection,
+        int(profile["id"]),
+        career_profile=next_profile,
+    )
+    return suggestion_records
+
+
+def _sync_auto_applied_career_profile(
+    db_path: str | Path,
+    *,
+    applied_suggestion_count: int,
+    soul_path: str | Path,
+) -> dict[str, Any]:
+    if applied_suggestion_count <= 0:
+        return {
+            "status": "skipped",
+            "applied_suggestion_count": 0,
+            "soul_synced": False,
+            "soul_backup_path": None,
+            "soul_sync_error": None,
+        }
+
+    soul_synced = False
+    soul_sync_error = None
+    soul_backup_path = None
+    try:
+        backup_path = sync_career_profile_to_soul(db_path, soul_path=soul_path)
+        soul_synced = True
+        soul_backup_path = str(backup_path) if backup_path is not None else None
+    except Exception as exc:  # noqa: BLE001 - DB profile remains source of truth
+        soul_sync_error = _safe_error(exc)
+
+    return {
+        "status": "applied",
+        "applied_suggestion_count": applied_suggestion_count,
+        "soul_synced": soul_synced,
+        "soul_backup_path": soul_backup_path,
+        "soul_sync_error": soul_sync_error,
+    }
 
 
 def get_career_chat_history(db_path: str | Path, session_id: int) -> dict[str, Any]:
@@ -480,7 +557,8 @@ Assistant text may provide clarifying questions, direction analysis, risk warnin
 Do not create, update, or claim to create DayPilot projects, daily goals, check-ins, or weekly reports.
 Do not browse the web or invent market data. Make advice from the provided local context only.
 Structured recommendations are optional. When you include them, each must be a concrete project or experiment with a visible deliverable.
-If you infer stable user-profile facts, put them in profile_update_suggestions so the user can confirm before saving.
+If you infer stable user-profile facts with clear evidence, put them in profile_update_suggestions because DayPilot will save them automatically.
+Do not include temporary moods, one-off constraints, guesses, or sensitive conclusions in profile_update_suggestions.
 Use concise Chinese for user-facing text.
 """
     user = {
@@ -512,7 +590,7 @@ Use concise Chinese for user-facing text.
             "recommendations may be an empty array when assistant_message is the better response.",
             "Use structured recommendations only when concrete project cards help the user decide what to do next.",
             "Each structured recommendation must name a deliverable.",
-            "Profile update suggestions are not saved automatically.",
+            "profile_update_suggestions are saved automatically, so include only stable and evidence-backed profile facts.",
             "Do not output Markdown fences.",
         ],
     }
@@ -623,7 +701,7 @@ def _normalize_profile_update_suggestions(value: Any) -> list[dict[str, Any]]:
                 "category": category,
                 "items": items,
                 "evidence": _with_fallback(item.get("evidence"), "来自本轮职业规划聊天。", 260),
-                "reason": _with_fallback(item.get("reason"), "确认后可让后续职业建议更贴合。", 260),
+                "reason": _with_fallback(item.get("reason"), "保存后可让后续职业建议更贴合。", 260),
             }
         )
     return suggestions[:6]
@@ -658,7 +736,7 @@ def _profile_suggestions_from_message(message: str) -> list[dict[str, Any]]:
                 "category": "personality_and_work_style",
                 "items": work_style,
                 "evidence": message[:220],
-                "reason": "用户表达了工作方式或性格偏好，应先确认再保存。",
+                "reason": "用户表达了稳定的工作方式或性格偏好，可用于后续职业建议。",
             }
         )
     constraints = _extract_constraint_items(message)

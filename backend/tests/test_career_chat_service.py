@@ -87,7 +87,7 @@ def _table_count(db_path: Path, table: str) -> int:
         connection.close()
 
 
-def test_career_chat_saves_chat_and_pending_suggestions_without_touching_goal_loop() -> None:
+def test_career_chat_saves_chat_and_auto_applies_suggestions_without_touching_goal_loop() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         db_path = root / "career-chat.sqlite3"
@@ -112,14 +112,27 @@ def test_career_chat_saves_chat_and_pending_suggestions_without_touching_goal_lo
         if result["recommendations"]:
             assert any("Agent" in item["title"] or "Agent" in item["why_it_fits"] for item in result["recommendations"])
         assert result["profile_update_suggestions"]
-        assert {item["status"] for item in result["profile_update_suggestions"]} == {"pending"}
+        assert {item["status"] for item in result["profile_update_suggestions"]} == {"applied"}
+        assert result["career_profile_update"]["status"] == "applied"
+        assert result["career_profile_update"]["applied_suggestion_count"] == len(result["profile_update_suggestions"])
+        assert result["career_profile_update"]["soul_synced"] is True
         assert _table_count(db_path, "projects") == before_projects
         assert _table_count(db_path, "daily_goals") == before_goals
         assert _table_count(db_path, "goal_versions") == before_versions
 
         history = get_career_chat_history(db_path, int(result["session_id"]))
         assert len(history["messages"]) == 2
-        assert history["pending_profile_update_suggestions"]
+        assert history["pending_profile_update_suggestions"] == []
+        soul_text = soul_path.read_text(encoding="utf-8")
+        assert "## 当前技能点" in soul_text
+        assert "## 发展意愿" in soul_text
+
+        connection = initialize_database(db_path)
+        try:
+            profile = repo.get_user_profile(connection)
+        finally:
+            connection.close()
+        assert profile["career_profile"]["evidence"]
 
 
 def test_career_chat_allows_assistant_text_without_recommendation_cards() -> None:
@@ -159,27 +172,50 @@ def test_career_chat_allows_assistant_text_without_recommendation_cards() -> Non
 
         assert result["recommendations"] == []
         assert result["profile_update_suggestions"] == []
+        assert result["career_profile_update"]["status"] == "skipped"
         history = get_career_chat_history(db_path, int(result["session_id"]))
         assert len(history["messages"]) == 2
         assert history["messages"][1]["recommendations"] == []
         prompt_text = "\n".join(item["content"] for item in captured_messages)
         assert "Return 1 to 3 recommendations" not in prompt_text
         assert "recommendations may be an empty array" in prompt_text
+        assert "saved automatically" in prompt_text
+        assert "not saved automatically" not in prompt_text
 
 
-def test_profile_suggestion_apply_updates_structured_profile_and_soul() -> None:
+def test_legacy_profile_suggestion_apply_updates_structured_profile_and_soul() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
-        db_path = root / "career-apply.sqlite3"
+        db_path = root / "career-legacy-apply.sqlite3"
         soul_path = _soul_file(root)
         _seed_profile_and_project(db_path)
-        chat = send_career_chat_message(
-            db_path,
-            {"message": "我会 Python，也想发展 AI Agent，喜欢项目驱动学习。"},
-            soul_path=soul_path,
-            today=date(2026, 6, 11),
-        ).payload
-        suggestion_id = int(chat["profile_update_suggestions"][0]["id"])
+        connection = initialize_database(db_path)
+        try:
+            with connection:
+                session_id = repo.create_career_chat_session(connection, title="legacy pending")
+                message_id = repo.create_career_chat_message(
+                    connection,
+                    session_id=session_id,
+                    role="assistant",
+                    content="历史待确认画像建议。",
+                    recommendations=[],
+                    profile_update_suggestions=[],
+                    context_snapshot={"source": "legacy-test"},
+                )
+                suggestion_id = repo.create_career_profile_update_suggestion(
+                    connection,
+                    session_id=session_id,
+                    message_id=message_id,
+                    category="development_intentions",
+                    suggestion_payload={
+                        "category": "development_intentions",
+                        "items": ["希望发展 AI Agent 系统设计能力"],
+                        "evidence": "历史 pending 记录。",
+                        "reason": "用于验证旧确认接口兼容性。",
+                    },
+                )
+        finally:
+            connection.close()
 
         applied = decide_career_profile_suggestion(
             db_path,
@@ -206,10 +242,10 @@ def test_profile_suggestion_apply_updates_structured_profile_and_soul() -> None:
         assert profile["career_profile"]["evidence"]
 
 
-def test_profile_suggestion_dismiss_does_not_update_profile() -> None:
+def test_legacy_profile_suggestion_dismiss_does_not_update_profile() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
-        db_path = root / "career-dismiss.sqlite3"
+        db_path = root / "career-legacy-dismiss.sqlite3"
         soul_path = _soul_file(root)
         _seed_profile_and_project(db_path)
         before = initialize_database(db_path)
@@ -217,13 +253,33 @@ def test_profile_suggestion_dismiss_does_not_update_profile() -> None:
             before_profile = repo.get_user_profile(before)["career_profile"]
         finally:
             before.close()
-        chat = send_career_chat_message(
-            db_path,
-            {"message": "我不确定未来方向，但可能想看 AI Agent。"},
-            soul_path=soul_path,
-            today=date(2026, 6, 11),
-        ).payload
-        suggestion_id = int(chat["profile_update_suggestions"][0]["id"])
+        connection = initialize_database(db_path)
+        try:
+            with connection:
+                session_id = repo.create_career_chat_session(connection, title="legacy pending")
+                message_id = repo.create_career_chat_message(
+                    connection,
+                    session_id=session_id,
+                    role="assistant",
+                    content="历史待确认画像建议。",
+                    recommendations=[],
+                    profile_update_suggestions=[],
+                    context_snapshot={"source": "legacy-test"},
+                )
+                suggestion_id = repo.create_career_profile_update_suggestion(
+                    connection,
+                    session_id=session_id,
+                    message_id=message_id,
+                    category="development_intentions",
+                    suggestion_payload={
+                        "category": "development_intentions",
+                        "items": ["可能想看 AI Agent"],
+                        "evidence": "历史 pending 记录。",
+                        "reason": "用于验证旧忽略接口兼容性。",
+                    },
+                )
+        finally:
+            connection.close()
 
         dismissed = decide_career_profile_suggestion(
             db_path,
@@ -259,15 +315,17 @@ def test_career_chat_with_missing_soul_and_empty_profile_still_gives_conservativ
         if result["recommendations"]:
             assert "画像" in result["recommendations"][0]["title"] or result["profile_update_suggestions"]
         assert result["profile_update_suggestions"]
+        assert {item["status"] for item in result["profile_update_suggestions"]} == {"applied"}
+        assert result["career_profile_update"]["status"] == "applied"
 
 
 def main() -> None:
-    test_career_chat_saves_chat_and_pending_suggestions_without_touching_goal_loop()
+    test_career_chat_saves_chat_and_auto_applies_suggestions_without_touching_goal_loop()
     test_career_chat_allows_assistant_text_without_recommendation_cards()
-    test_profile_suggestion_apply_updates_structured_profile_and_soul()
-    test_profile_suggestion_dismiss_does_not_update_profile()
+    test_legacy_profile_suggestion_apply_updates_structured_profile_and_soul()
+    test_legacy_profile_suggestion_dismiss_does_not_update_profile()
     test_career_chat_with_missing_soul_and_empty_profile_still_gives_conservative_advice()
-    print("PASS: career chat service preserves goal loop and confirms profile updates")
+    print("PASS: career chat service preserves goal loop and auto-applies profile updates")
 
 
 if __name__ == "__main__":

@@ -814,9 +814,7 @@ button:focus-visible {
 .career-session-panel,
 .career-chat-panel,
 .career-results,
-.career-profile-suggestions,
-.career-recommendation-card,
-.career-suggestion-card {
+.career-recommendation-card {
   border-radius: 8px;
   background: var(--surface);
   box-shadow: 0 8px 20px rgba(48, 52, 58, 0.055);
@@ -895,21 +893,18 @@ button:focus-visible {
   background: rgba(255, 252, 244, 0.42);
 }
 
-.career-results,
-.career-profile-suggestions {
+.career-results {
   display: grid;
   gap: 12px;
   padding: 14px;
 }
 
-.career-recommendations,
-.career-suggestion-list {
+.career-recommendations {
   display: grid;
   gap: 12px;
 }
 
-.career-recommendation-card,
-.career-suggestion-card {
+.career-recommendation-card {
   display: grid;
   gap: 10px;
   padding: 14px;
@@ -931,12 +926,6 @@ button:focus-visible {
 
 .career-meta-block p {
   margin: 0;
-}
-
-.career-suggestion-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
 }
 
 [hidden] {

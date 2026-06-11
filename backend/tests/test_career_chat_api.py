@@ -105,6 +105,9 @@ def test_career_chat_api_endpoints() -> None:
             assert chat["assistant_message"]["role"] == "assistant"
             assert isinstance(chat["recommendations"], list)
             assert chat["profile_update_suggestions"]
+            assert {item["status"] for item in chat["profile_update_suggestions"]} == {"applied"}
+            assert chat["career_profile_update"]["status"] == "applied"
+            assert chat["career_profile_update"]["applied_suggestion_count"] == len(chat["profile_update_suggestions"])
 
             status, sessions = _request("GET", f"{base}/api/career-chat/sessions")
             assert status == 200
@@ -113,9 +116,35 @@ def test_career_chat_api_endpoints() -> None:
             status, history = _request("GET", f"{base}/api/career-chat/history?session_id={chat['session_id']}")
             assert status == 200
             assert len(history["messages"]) == 2
-            assert history["pending_profile_update_suggestions"]
+            assert history["pending_profile_update_suggestions"] == []
 
-            suggestion_id = history["pending_profile_update_suggestions"][0]["id"]
+            connection = initialize_database(db_path)
+            try:
+                with connection:
+                    message_id = repo.create_career_chat_message(
+                        connection,
+                        session_id=int(chat["session_id"]),
+                        role="assistant",
+                        content="历史待确认画像建议。",
+                        recommendations=[],
+                        profile_update_suggestions=[],
+                        context_snapshot={"source": "legacy-api-test"},
+                    )
+                    suggestion_id = repo.create_career_profile_update_suggestion(
+                        connection,
+                        session_id=int(chat["session_id"]),
+                        message_id=message_id,
+                        category="development_intentions",
+                        suggestion_payload={
+                            "category": "development_intentions",
+                            "items": ["希望继续发展 AI Agent 工程能力"],
+                            "evidence": "历史 pending 记录。",
+                            "reason": "用于验证旧确认接口兼容性。",
+                        },
+                    )
+            finally:
+                connection.close()
+
             status, applied = _request(
                 "POST",
                 f"{base}/api/career-chat/profile-suggestion",
@@ -124,30 +153,6 @@ def test_career_chat_api_endpoints() -> None:
             assert status == 200
             assert applied["status"] == "applied"
             assert applied["career_profile"]
-
-            status, second_chat = _request(
-                "POST",
-                f"{base}/api/career-chat",
-                {
-                    "session_id": chat["session_id"],
-                    "message": "我可能也有点焦虑，先不要保存这个判断。",
-                },
-            )
-            assert status == 200
-            status, second_history = _request(
-                "GET",
-                f"{base}/api/career-chat/history?session_id={chat['session_id']}",
-            )
-            assert status == 200
-            pending = second_history["pending_profile_update_suggestions"]
-            assert pending
-            status, dismissed = _request(
-                "POST",
-                f"{base}/api/career-chat/profile-suggestion",
-                {"suggestion_id": pending[0]["id"], "decision": "dismiss"},
-            )
-            assert status == 200
-            assert dismissed["status"] == "dismissed"
         finally:
             server.shutdown()
             server.server_close()

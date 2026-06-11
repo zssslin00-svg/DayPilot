@@ -42,7 +42,7 @@ The AI is not just a task generator. It helps organize project state, rewrite to
 
 **Local private workbench**: Keep the SQLite database, LLM logs, backups, and real `SOUL.md` on your machine by default, so personal projects, preferences, reviews, and career context can compound privately.
 
-**A personal profile that gets smarter with use**: Detect habits and constraints from stable context, daily feedback, check-ins, weekly-report preferences, and career chat. New profile facts become pending suggestions first, then are written to SQLite and `SOUL.md` only after confirmation.
+**A personal profile that gets smarter with use**: Detect habits and constraints from stable context, daily feedback, check-ins, weekly-report preferences, and career chat. New profile facts that the AI judges clear, stable, and worth keeping are written to SQLite and `SOUL.md` automatically.
 
 **AI project and goal adjustment**: Generate small, deliverable goals for active projects with acceptance criteria, minimum output, time estimate, and difficulty. Changes to project names, summaries, planning guidance, targets, or priority can refresh the matching daily goal.
 
@@ -62,7 +62,7 @@ DayPilot needs to know who you are, what you are working on, and how you like to
 | --- | --- | --- | --- |
 | DeepSeek config | `.env` | `DEEPSEEK_API_KEY`, model, and timeout settings | The API key is required only when `DAYPILOT_LLM_MODE=deepseek`. The real LLM path uses it to generate goals, interpret feedback, organize project state, generate weekly reports, and answer career-planning chats. |
 | Stable personal profile | `SOUL.md`, copied from `SOUL.example.md` | Long-term direction, current skills, personality and work style, development intentions, career values and constraints, current project boundaries, user preferences, avoid rules, time budget, and goal-generation principles | Read on every agent call as long-term context, shaping goals, weekly reports, career advice, and later generated content. Good for stable information, not for temporary same-day details. |
-| Career planning chat | Left-side **Career Planning** in the web app | Spare time, career questions, desired direction, current skills, and personality notes | Gives direction analysis, clarifying questions, project suggestions, risks, and next actions. New profile facts become pending suggestions first, then are written to SQLite and `SOUL.md` only after user confirmation. |
+| Career planning chat | Left-side **Career Planning** in the web app | Spare time, career questions, desired direction, current skills, and personality notes | Gives direction analysis, clarifying questions, project suggestions, risks, and next actions. Clear and stable new profile facts are written to SQLite and `SOUL.md` automatically. |
 | Project changes | Left-side **Project Update**, or edit `SOUL.md` and click Today **Refresh** | "Add project: ... current progress: ... goal: ...", or maintain the current-project numbered/bulleted list in `SOUL.md` | Written to the SQLite project table and reflected in the current-project section of `SOUL.md`; active projects removed from that list are marked completed, with history preserved. |
 | Today's preference or constraint | Today page **Feedback Revision** | "I only have 30 minutes today", "this goal is too large", "I want to do experiments", or "do not give abstract goals later" | First revises today's goal. If it is a stable preference or avoid pattern, it becomes long-term memory. |
 | End-of-day facts | Today page **Check-in** | Completion status, completion notes, felt difficulty, and tomorrow's direction | Used as history, project-progress evidence, weekly-report evidence, and the handoff into the next day's goal. |
@@ -212,7 +212,7 @@ Core data flow:
 3. JSON is written to SQLite after schema validation, normalization, and quality checks.
 4. The frontend reads the API and displays Today, History, Weekly, Project Update, and Career Chat.
 5. If `SOUL.md` sync fails, the failed task enters the SQLite retry queue and the background maintenance loop retries it.
-6. Career chat only saves sessions and messages. Profile updates become pending suggestions first, and are merged into `user_profile.career_profile` and synced to `SOUL.md` only after user confirmation.
+6. Career chat saves sessions and messages. Profile updates judged worth keeping are merged into `user_profile.career_profile` and synced to `SOUL.md` automatically, with applied audit records kept in SQLite.
 
 ## Tech Stack
 
@@ -280,8 +280,8 @@ scripts\restore_latest_db.bat
 - When a project changes in a meaningful way, today's goal can refresh too, so DayPilot does not keep using an old project name or stale goal.
 - Every time today's goal is generated, regenerated, or revised with feedback, History shows the latest version. Older versions stay in the background for later review.
 - If you edit today's check-in, the new content replaces the old progress update, so outdated notes do not keep affecting the project.
-- Career planning chat saves the conversation and can notice new skills, preferences, constraints, or development directions worth keeping. Those become pending suggestions first.
-- DayPilot updates your personal profile and syncs it to `SOUL.md` only after you confirm a suggestion. Dismissing a suggestion does not change the profile, create projects, refresh goals, or write check-ins.
+- Career planning chat saves the conversation and automatically keeps clear, stable, evidence-backed skills, preferences, constraints, or development directions.
+- Career-chat profile distillation only updates the personal profile and syncs `SOUL.md`; it does not create projects, refresh goals, or write check-ins.
 
 ## API Surface
 
@@ -299,7 +299,7 @@ scripts\restore_latest_db.bat
 - `POST /api/career-chat`
 - `GET /api/career-chat/sessions`
 - `GET /api/career-chat/history?session_id=...`
-- `POST /api/career-chat/profile-suggestion`
+- `POST /api/career-chat/profile-suggestion` (legacy: only for old pending profile suggestions)
 - `GET /api/soul-sync/status`
 - `POST /api/soul-sync/retry`
 
@@ -311,7 +311,7 @@ scripts\restore_latest_db.bat
 - LLM logs do not write API keys or Authorization headers.
 - The startup script backs up an existing SQLite database before starting services.
 - Career chat may send chat content to the configured DeepSeek endpoint; with `DAYPILOT_LLM_MODE=mock`, it uses the local deterministic fallback instead.
-- The assistant never silently rewrites your career profile. SQLite and `SOUL.md` change only after you confirm the "information to save to profile" in the frontend.
+- Career planning chat automatically saves profile facts that the AI judges clear and stable. Temporary moods, one-off constraints, and unsupported guesses should not be distilled.
 - Before uploading to GitHub, do not commit personal databases, LLM logs, or the private `SOUL.md`; the repository keeps only `SOUL.example.md`.
 
 ## License
