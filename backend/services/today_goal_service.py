@@ -32,6 +32,7 @@ MOCK_MODEL_NAME = "mock-daily-goal-adapter"
 @dataclass(frozen=True)
 class TodayGoalResult:
     goals: list[dict[str, Any]]
+    active_project_count: int
     created_count: int
     carried_over_count: int
 
@@ -295,10 +296,13 @@ def get_or_generate_today_goal(
                     raise DailyGoalGenerationError("Generated goal was not persisted.")
                 goals.append(_attach_goal_output(generated))
 
+            _append_unchecked_existing_goals(connection, goal_date, goals)
+
         if sync_source_goal_id is not None:
             sync_current_projects_to_soul_if_requested(db_path, soul_path, sync_source_goal_id)
         return TodayGoalResult(
             goals=goals,
+            active_project_count=len(active_projects),
             created_count=created_count,
             carried_over_count=carried_over_count,
         )
@@ -402,10 +406,13 @@ def regenerate_today_goal(
                 goals.append(_attach_goal_output(generated))
                 regenerated_count += 1
 
+            _append_unchecked_existing_goals(connection, goal_date, goals)
+
         if sync_source_goal_id is not None:
             sync_current_projects_to_soul_if_requested(db_path, soul_path, sync_source_goal_id)
         return TodayGoalResult(
             goals=goals,
+            active_project_count=len(active_projects),
             created_count=regenerated_count,
             carried_over_count=0,
         )
@@ -831,6 +838,27 @@ def goal_output_from_record(goal_record: dict[str, Any]) -> dict[str, Any] | Non
             "difficulty_reason": "难度来自已保存目标版本，并被限制在 1-5 范围内。",
         },
     }
+
+
+def _append_unchecked_existing_goals(
+    connection: sqlite3.Connection,
+    goal_date: str,
+    goals: list[dict[str, Any]],
+) -> None:
+    seen_goal_ids = {
+        int(record["daily_goal"]["id"])
+        for record in goals
+        if record.get("daily_goal") and record["daily_goal"].get("id") is not None
+    }
+    for record in repo.list_goal_records_by_date(connection, goal_date):
+        daily_goal = record.get("daily_goal") or {}
+        daily_goal_id = daily_goal.get("id")
+        if daily_goal_id is None or int(daily_goal_id) in seen_goal_ids:
+            continue
+        if record.get("active_version") is None or record.get("daily_checkin") is not None:
+            continue
+        goals.append(_attach_goal_output(record))
+        seen_goal_ids.add(int(daily_goal_id))
 
 
 def _latest_unfinished_goal_record(records: list[dict[str, Any]]) -> dict[str, Any] | None:

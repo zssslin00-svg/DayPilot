@@ -531,6 +531,92 @@ def test_workday_today_goal_repairs_stale_checked_in_status_without_checkin() ->
             connection.close()
 
 
+def test_workday_today_goal_keeps_unchecked_existing_goal_from_completed_project() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = Path(temp_dir) / "daypilot-completed-project-pending-checkin.sqlite3"
+        connection = initialize_database(db_path)
+        try:
+            with connection:
+                repo.create_user_profile(
+                    connection,
+                    id=1,
+                    long_term_direction="Keep today's generated goals accountable.",
+                    current_focus_projects=["Active project"],
+                )
+                active_project_id = repo.create_project(
+                    connection,
+                    name="Active project",
+                    status="active",
+                )
+                completed_project_id = repo.create_project(
+                    connection,
+                    name="Completed but pending check-in",
+                    status="completed",
+                )
+                active_goal_id = repo.create_daily_goal(
+                    connection,
+                    project_id=active_project_id,
+                    goal_date="2026-06-08",
+                    context_snapshot={"source": "test"},
+                    generated_at="2026-06-08 09:00:00",
+                )
+                pending_goal_id = repo.create_daily_goal(
+                    connection,
+                    project_id=completed_project_id,
+                    goal_date="2026-06-08",
+                    context_snapshot={"source": "test"},
+                    generated_at="2026-06-08 09:10:00",
+                )
+                for goal_id, main_goal in (
+                    (active_goal_id, "Finish active project goal."),
+                    (pending_goal_id, "Finish pending completed-project check-in."),
+                ):
+                    repo.create_goal_version(
+                        connection,
+                        daily_goal_id=goal_id,
+                        version_no=1,
+                        is_active=1,
+                        main_goal=main_goal,
+                        goal_reason="Seeded for today API test.",
+                        success_criteria=["Return the right goal"],
+                        estimated_minutes=45,
+                        difficulty_level=2,
+                        minimum_version="The goal is visible when needed.",
+                        goal_type="coding",
+                        revision_source="initial_generation",
+                    )
+                repo.create_daily_checkin(
+                    connection,
+                    daily_goal_id=active_goal_id,
+                    checkin_date="2026-06-08",
+                    week_id="2026-W24",
+                    completion_text="Active project is done.",
+                    felt_difficulty=2,
+                    parsed_completion_rate=1.0,
+                    completed_items=["active"],
+                    unfinished_items=[],
+                    blockers=[],
+                    actual_outputs=["active output"],
+                    processor_snapshot={"source": "test"},
+                    created_at="2026-06-08 18:00:00",
+                )
+        finally:
+            connection.close()
+
+        status, payload = _get_today_goal(date(2026, 6, 8), db_path)
+
+        assert status == 200
+        assert payload["active_project_count"] == 1
+        assert [goal["daily_goal"]["id"] for goal in payload["goals"]] == [
+            active_goal_id,
+            pending_goal_id,
+        ]
+        pending_goal = payload["goals"][1]
+        assert pending_goal["project"]["status"] == "completed"
+        assert pending_goal["daily_checkin"] is None
+        assert pending_goal["goal_output"]["main_goal"] == "Finish pending completed-project check-in."
+
+
 def test_workday_generation_reads_required_context() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         db_path = Path(temp_dir) / "daypilot-context-test.sqlite3"
@@ -749,6 +835,7 @@ def main() -> None:
     test_workday_today_goal_reads_existing_goal()
     test_workday_today_goal_includes_existing_checkin()
     test_workday_today_goal_repairs_stale_checked_in_status_without_checkin()
+    test_workday_today_goal_keeps_unchecked_existing_goal_from_completed_project()
     test_workday_generation_reads_required_context()
     test_multi_project_generation_and_next_day_carryover()
     print("PASS: GET /api/today-goal generates, persists, reuses, and reads required context")
