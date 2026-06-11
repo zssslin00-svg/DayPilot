@@ -221,6 +221,16 @@ CREATE TABLE IF NOT EXISTS soul_sync_retry_jobs (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS soul_project_import_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  section_hash TEXT NOT NULL DEFAULT '',
+  section_text TEXT NOT NULL DEFAULT '',
+  snapshot TEXT NOT NULL DEFAULT '{}',
+  last_imported_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS ability_state (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   state_date TEXT NOT NULL,

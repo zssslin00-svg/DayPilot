@@ -46,7 +46,7 @@ By default, data stays on your machine: the SQLite database, LLM logs, backups, 
 
 **Long-term memory**: When feedback reveals a stable preference, such as "do not give me pure learning goals" or "each goal must leave an inspectable output", the system writes it to the database and syncs it into the user profile section of `SOUL.md`.
 
-**Project updates**: Add projects, mark projects complete, and update project status in natural language. The system keeps the current project list in sync.
+**Project updates**: Add projects, mark projects complete, and update project status in natural language, or edit the current-project section in `SOUL.md` and click **Refresh** on the Today page. The system keeps the current project list in sync.
 
 **End-of-day check-in**: Record completion text, completion status, felt difficulty, and tomorrow's direction as evidence for later goals and weekly reports.
 
@@ -61,7 +61,7 @@ DayPilot needs to know who you are, what you are working on, and how you like to
 | DeepSeek config | `.env` | `DEEPSEEK_API_KEY`, model, and timeout settings | The API key is required only when `DAYPILOT_LLM_MODE=deepseek`. The real LLM path uses it to generate goals, interpret feedback, and generate weekly reports. |
 | Stable personal profile | `SOUL.md`, copied from `SOUL.example.md` | Long-term direction, current skills, personality and work style, development intentions, career values and constraints, current project boundaries, user preferences, avoid rules, time budget, and goal-generation principles | Read on every agent call as long-term context. Good for stable information, not for temporary same-day details. |
 | Career planning chat | Left-side **Career Planning** in the web app | Spare time, career questions, desired direction, current skills, and personality notes | Gives direction analysis, clarifying questions, project suggestions, risks, and next actions. New profile facts become pending suggestions first, then are written to SQLite and `SOUL.md` only after user confirmation. |
-| Project changes | Left-side **Project Update** in the web app | "Add project: ... current progress: ... goal: ...", or "this project is complete; the result is ..." | Written to the SQLite project table and reflected in the current-project section of `SOUL.md`. |
+| Project changes | Left-side **Project Update**, or edit `SOUL.md` and click Today **Refresh** | "Add project: ... current progress: ... goal: ...", or maintain the current-project numbered/bulleted list in `SOUL.md` | Written to the SQLite project table and reflected in the current-project section of `SOUL.md`; active projects removed from that list are marked completed, with history preserved. |
 | Today's preference or constraint | Today page **Feedback Revision** | "I only have 30 minutes today", "this goal is too large", "I want to do experiments", or "do not give abstract goals later" | First revises today's goal. If it is a stable preference or avoid pattern, it becomes long-term memory. |
 | End-of-day facts | Today page **Check-in** | Completion status, completion notes, felt difficulty, and tomorrow's direction | Used as history, project-progress evidence, weekly-report evidence, and the handoff into the next day's goal. |
 | Weekly report preference | Weekly page **Weekly Report Feedback** | "Make next week's plan more verifiable" or "do not write it like a diary log" | Generates a new weekly report version and saves stable weekly-report preferences. |
@@ -297,6 +297,7 @@ scripts\restore_latest_db.bat
 
 - The current project state is canonical in `projects.project_state`; compatibility fields such as `status_summary` and `planning_bias` are derived from that JSON state for API responses.
 - `project_state` stores project summaries, planning guidance, targets, facts, and recent update sources. Project updates, check-in progress, and migration logic write to this canonical state so old historical fields do not overwrite current project intent.
+- The `Current Projects` section in `SOUL.md` can act as the active-project list: edit its numbered/bulleted list, then click **Refresh** on the Today page to import additions, renames, priority, progress, and target changes. Active projects removed from that list are marked `completed`, not hard-deleted.
 - Changes to project names, summaries, planning guidance, targets, or priority can refresh the corresponding daily goal for the current day.
 - The History view shows the current active goal version for each `daily_goal`; older versions remain in the version chain for audit.
 - Structured career profile data is stored in `user_profile.career_profile`. Career chat stores `career_chat_sessions` and `career_chat_messages`, but it does not automatically create projects, refresh today's goal, or write check-ins.
@@ -312,6 +313,7 @@ scripts\restore_latest_db.bat
 - `POST /api/today-goal/regenerate`
 - `POST /api/goal-feedback`
 - `POST /api/projects/lifecycle`
+- `POST /api/soul-sync/import-projects`
 - `POST /api/weekly-report/generate`
 - `POST /api/weekly-report/feedback`
 - `POST /api/career-chat`

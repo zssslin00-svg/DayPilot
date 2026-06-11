@@ -115,6 +115,27 @@ def apply_project_lifecycle_message(
     return ProjectLifecycleResult(payload)
 
 
+def apply_project_lifecycle_output(
+    db_path: str | Path,
+    *,
+    message: str,
+    output: dict[str, Any],
+    llm_metadata: dict[str, Any] | None = None,
+    soul_path: str | Path = SOUL_PATH,
+    today: date | None = None,
+) -> ProjectLifecycleResult:
+    normalized = _normalize_lifecycle_batch_output(output)
+    payload = _apply_lifecycle_output(
+        db_path,
+        message=message,
+        output=normalized,
+        llm_metadata=llm_metadata or {},
+        soul_path=Path(soul_path),
+        today=today,
+    )
+    return ProjectLifecycleResult(payload)
+
+
 class MockProjectLifecycleAdapter:
     def generate(self, context: dict[str, Any]) -> dict[str, Any]:
         message = context["message"]

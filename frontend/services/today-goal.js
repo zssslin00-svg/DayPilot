@@ -112,8 +112,18 @@ async function loadInitialData() {
 
 async function handleTodayRefresh() {
   hideAlert();
-  await regenerateTodayGoal();
-  await loadHistory();
+  let soulImportPayload = null;
+  try {
+    soulImportPayload = await importSoulProjectsBeforeRefresh();
+    if (!elements.projectModal.hidden) {
+      await loadProjects();
+    }
+    await regenerateTodayGoal();
+    await loadHistory();
+    showSoulProjectImportNotice(soulImportPayload);
+  } catch (error) {
+    showAlert(errorMessage(error));
+  }
 }
 
 function startCrossDayRefreshWatcher() {
@@ -210,6 +220,24 @@ async function loadHistory() {
     syncTodayCheckin(payload.daily_records || []);
   } catch (error) {
     showAlert(errorMessage(error));
+  }
+}
+
+async function importSoulProjectsBeforeRefresh() {
+  return requestJson("/api/soul-sync/import-projects", { method: "POST" });
+}
+
+function showSoulProjectImportNotice(payload) {
+  if (!payload || payload.status === "no_change") {
+    return;
+  }
+  const changed =
+    Number(payload.created_count || 0) +
+    Number(payload.updated_count || 0) +
+    Number(payload.renamed_count || 0) +
+    Number(payload.completed_count || 0);
+  if (changed > 0) {
+    showAlert(payload.message || "SOUL.md 当前项目已同步。");
   }
 }
 

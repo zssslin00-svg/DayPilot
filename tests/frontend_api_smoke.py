@@ -226,6 +226,8 @@ def main() -> None:
                 "renderVisibleTodayGoalCards",
                 "handleCareerChatSubmit",
                 "careerCategoryLabel",
+                "importSoulProjectsBeforeRefresh",
+                "/api/soul-sync/import-projects",
                 "elements.careerResults.hidden = !normalized.length",
                 "今天的项目都已 check-in",
             ]:

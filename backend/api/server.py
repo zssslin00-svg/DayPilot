@@ -44,6 +44,10 @@ from backend.services.project_lifecycle_service import (  # noqa: E402
 )
 from backend.services.runtime_maintenance_service import start_background_maintenance  # noqa: E402
 from backend.services.soul_context import SOUL_PATH  # noqa: E402
+from backend.services.soul_project_import_service import (  # noqa: E402
+    SoulProjectImportError,
+    import_current_projects_from_soul,
+)
 from backend.services.soul_sync_service import (  # noqa: E402
     get_soul_sync_status,
     retry_soul_sync_jobs,
@@ -148,6 +152,10 @@ class DayPilotHandler(BaseHTTPRequestHandler):
 
         if path == "/api/soul-sync/retry":
             self._handle_soul_sync_retry()
+            return
+
+        if path == "/api/soul-sync/import-projects":
+            self._handle_soul_project_import()
             return
 
         if path == "/api/career-chat":
@@ -418,6 +426,19 @@ class DayPilotHandler(BaseHTTPRequestHandler):
             self.server.db_path,
             soul_path=self.server.soul_path,
         )
+        self._send_json(200, result.payload)
+
+    def _handle_soul_project_import(self) -> None:
+        try:
+            result = import_current_projects_from_soul(
+                self.server.db_path,
+                soul_path=self.server.soul_path,
+                today=self.server.today_provider(),
+            )
+        except SoulProjectImportError as exc:
+            self._send_json(400, {"error": "invalid_soul_project_import", "detail": str(exc)})
+            return
+
         self._send_json(200, result.payload)
 
     def _handle_career_chat_sessions(self) -> None:

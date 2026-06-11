@@ -179,6 +179,15 @@ TABLE_COLUMNS: dict[str, set[str]] = {
         "created_at",
         "updated_at",
     },
+    "soul_project_import_state": {
+        "id",
+        "section_hash",
+        "section_text",
+        "snapshot",
+        "last_imported_at",
+        "created_at",
+        "updated_at",
+    },
     "ability_state": {
         "id",
         "state_date",
@@ -320,6 +329,7 @@ JSON_FIELDS: dict[str, set[str]] = {
         "raw_output",
     },
     "soul_sync_retry_jobs": {"payload"},
+    "soul_project_import_state": {"snapshot"},
     "ability_state": {
         "preferred_goal_type_weights",
         "short_term_preferences",
@@ -344,6 +354,7 @@ UPDATED_AT_TABLES = {
     "daily_goals",
     "daily_checkins",
     "soul_sync_retry_jobs",
+    "soul_project_import_state",
     "weekly_reports",
     "weekly_focus",
     "career_chat_sessions",
@@ -1238,6 +1249,24 @@ def list_recent_soul_sync_retry_jobs(
         """,
         (limit,),
     )
+
+
+def get_soul_project_import_state(connection: sqlite3.Connection) -> Record | None:
+    return _fetch_by_id(connection, "soul_project_import_state", 1)
+
+
+def upsert_soul_project_import_state(connection: sqlite3.Connection, **state: Any) -> Record:
+    existing = get_soul_project_import_state(connection)
+    if existing is None:
+        _insert(connection, "soul_project_import_state", {"id": 1, **state})
+        created = get_soul_project_import_state(connection)
+        if created is None:
+            raise RuntimeError("soul_project_import_state_was_not_persisted")
+        return created
+    updated = _update(connection, "soul_project_import_state", 1, state)
+    if updated is None:
+        raise RuntimeError("soul_project_import_state_was_not_updated")
+    return updated
 
 
 def create_ability_state(connection: sqlite3.Connection, **ability_state: Any) -> int:
