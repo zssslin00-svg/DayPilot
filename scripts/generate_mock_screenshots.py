@@ -258,7 +258,7 @@ def nav(img: Image.Image, selected: str = "today") -> None:
     draw_text(draw, (x + 20, 62), "DP", 10, BLUE, True)
     draw_text(draw, (x + 58, 59), "DayPilot", 16, BLUE, True)
 
-    items = [("today", "□", "今日"), ("history", "◇", "历史"), ("weekly", "⌁", "周报")]
+    items = [("today", "□", "今日"), ("history", "◇", "历史"), ("weekly", "⌁", "周报"), ("career", "✦", "职业规划")]
     y = 112
     for key, icon, label in items:
         is_selected = key == selected
@@ -268,14 +268,14 @@ def nav(img: Image.Image, selected: str = "today") -> None:
         draw_text(draw, (x + 48, y + 13), label, 15, BLUE if is_selected else TEXT, True if is_selected else False)
         y += 54
 
-    draw.rounded_rectangle((x, 280, sidebar_w - 22, 316), radius=8, fill=(250, 246, 236), outline=LINE)
-    draw_text(draw, (x + 58, 291), "项目更新", 13, TEXT)
+    action_y = y + 10
+    draw.rounded_rectangle((x, action_y, sidebar_w - 22, action_y + 38), radius=8, fill=(250, 246, 236), outline=LINE)
+    draw_text(draw, (x + 58, action_y + 11), "项目更新", 13, TEXT)
 
-    if selected == "history":
-        note_y = h - 118
-        draw.rounded_rectangle((x, note_y, sidebar_w - 22, note_y + 80), radius=8, fill=(252, 248, 239))
-        draw_text(draw, (x + 14, note_y + 17), "日用节奏", 14, TEXT, True)
-        draw_text(draw, (x + 14, note_y + 42), "小目标，留下可检查成果。", 13, TEXT)
+    note_y = h - 118
+    draw.rounded_rectangle((x, note_y, sidebar_w - 22, note_y + 80), radius=8, fill=(252, 248, 239))
+    draw_text(draw, (x + 14, note_y + 17), "日用节奏", 14, TEXT, True)
+    draw_text(draw, (x + 14, note_y + 42), "小目标，留下可检查成果。", 13, TEXT)
 
 
 def header(draw: ImageDraw.ImageDraw, left: int, right: int) -> None:
@@ -301,70 +301,126 @@ def draw_goal_card(
 ) -> None:
     draw = ImageDraw.Draw(img)
     x0, y0, x1, y1 = box
-    shadowed_round(img, box, 9, CARD, None, 18 if interactive else 0)
-    draw.line((x0 + 15, y0 + 18, x0 + 15, y1 - 15), fill=(129, 188, 219), width=4)
+    compact = (y1 - y0) < 660
+    shadowed_round(img, box, 8, (255, 253, 246), None, 12 if interactive else 0)
+    draw.rectangle((x0, y0 + 16, x0 + 4, y1 - 16), fill=(103, 169, 207))
 
-    draw_text(draw, (x0 + 36, y0 + 35), str(goal["project"]), 15, TEXT, True)
-    badge_x = x1 - 374
-    for value in [str(goal["date"]), str(goal["minutes"]), str(goal["difficulty"]), str(goal["tag"])]:
-        badge_x = badge(draw, (badge_x, y0 + 32), value, 12)
+    pad = 18
+    content_x0 = x0 + pad
+    content_x1 = x1 - pad
+    cursor_y = y0 + pad
 
-    draw_text(draw, (x0 + 52, y0 + 96), "今日目标", 12, BLUE, True)
-    draw_wrapped(draw, (x0 + 52, y0 + 122), str(goal["title"]), x1 - x0 - 120, 17, TEXT, True)
+    project_font = 14 if compact else 15
+    draw_text(draw, (content_x0, cursor_y + 2), str(goal["project"]), project_font, TEXT, True)
+    chips = [str(goal["date"]), str(goal["minutes"]), str(goal["difficulty"]), str(goal["tag"])]
+    badge_x = content_x1 - (328 if compact else 370)
+    for value in chips:
+        badge_x = badge(draw, (badge_x, cursor_y - 2), value, 11 if compact else 12)
+    cursor_y += 48 if compact else 54
 
-    two_cols = (x1 - x0) >= 760
-    criteria_x = x0 + 52
-    min_x = x0 + 595 if two_cols else x0 + 52
-    top = y0 + 210
-    draw_text(draw, (criteria_x, top), "完成标准", 15, TEXT, True)
+    title_h = 74 if compact else 86
+    draw.rounded_rectangle((content_x0, cursor_y, content_x1, cursor_y + title_h), radius=8, fill=(255, 250, 239))
+    draw_text(draw, (content_x0 + 16, cursor_y + 13), "今日目标", 11, BLUE, True)
+    draw_wrapped(
+        draw,
+        (content_x0 + 16, cursor_y + 38),
+        str(goal["title"]),
+        content_x1 - content_x0 - 32,
+        16 if compact else 18,
+        TEXT,
+        True,
+        line_gap=6,
+        max_lines=2,
+    )
+    cursor_y += title_h + 14
+
+    detail_h = 132 if compact else 156
+    gap = 12
+    min_w = 250 if compact else 280
+    criteria_w = content_x1 - content_x0 - gap - min_w
+    criteria_box = (content_x0, cursor_y, content_x0 + criteria_w, cursor_y + detail_h)
+    minimum_box = (content_x0 + criteria_w + gap, cursor_y, content_x1, cursor_y + detail_h)
+    for detail_box in (criteria_box, minimum_box):
+        draw.rounded_rectangle(detail_box, radius=8, fill=(255, 250, 239))
+
+    draw_text(draw, (criteria_box[0] + 14, criteria_box[1] + 13), "完成标准", 14, TEXT, True)
     for i, item in enumerate(goal["criteria"]):  # type: ignore[index]
-        draw_wrapped(draw, (criteria_x, top + 30 + i * 32), f"{i + 1}. {item}", 450 if two_cols else x1 - x0 - 100, 13, TEXT)
-    if two_cols:
-        draw_text(draw, (min_x, top), "最低成果", 15, TEXT, True)
-        draw_wrapped(draw, (min_x, top + 30), str(goal["minimum"]), x1 - min_x - 50, 13, TEXT)
+        draw_wrapped(
+            draw,
+            (criteria_box[0] + 14, criteria_box[1] + 40 + i * (27 if compact else 30)),
+            f"{i + 1}. {item}",
+            criteria_box[2] - criteria_box[0] - 28,
+            12 if compact else 13,
+            TEXT,
+            line_gap=5,
+            max_lines=1,
+        )
+    draw_text(draw, (minimum_box[0] + 14, minimum_box[1] + 13), "最低成果", 14, TEXT, True)
+    draw_wrapped(
+        draw,
+        (minimum_box[0] + 14, minimum_box[1] + 40),
+        str(goal["minimum"]),
+        minimum_box[2] - minimum_box[0] - 28,
+        12 if compact else 13,
+        TEXT,
+        line_gap=5,
+        max_lines=3,
+    )
+    cursor_y += detail_h + 14
 
-    if not interactive:
-        return
+    action_h = max(196 if compact else 270, y1 - cursor_y - pad)
+    form_w = (content_x1 - content_x0 - gap) // 2
+    feedback_box = (content_x0, cursor_y, content_x0 + form_w, min(cursor_y + action_h, y1 - pad))
+    checkin_box = (content_x0 + form_w + gap, cursor_y, content_x1, min(cursor_y + action_h, y1 - pad))
+    draw_compact_feedback(draw, feedback_box, compact)
+    draw_compact_checkin(draw, checkin_box, compact)
 
-    compact = (y1 - y0) < 760
-    form_y = y0 + (352 if compact else 392)
-    left_w = int((x1 - x0 - 118) * 0.46)
-    right_x = x0 + 52 + left_w + 46
-    draw_text(draw, (x0 + 52, form_y), "反馈修正", 15, TEXT, True)
-    feedback_bottom = form_y + (138 if compact else 175)
-    draw.rounded_rectangle((x0 + 52, form_y + 34, x0 + 52 + left_w, feedback_bottom), radius=7, fill=(255, 253, 248), outline=LINE)
-    draw.rounded_rectangle((x0 + 52, y1 - 75, x0 + 52 + left_w, y1 - 35), radius=7, fill=BLUE)
-    draw_text(draw, (x0 + 52 + left_w // 2 - 70, y1 - 64), "修正该项目目标", 13, (255, 255, 255), True)
 
-    draw_text(draw, (right_x, form_y), "Check-in", 15, TEXT, True)
-    draw_text(draw, (right_x, form_y + 30), "完成状态", 12, TEXT)
-    toggle_y = form_y + 52
-    toggle_w = x1 - right_x - 52
-    toggle_h = 38 if compact else 42
-    draw.rounded_rectangle((right_x, toggle_y, right_x + toggle_w, toggle_y + toggle_h), radius=7, fill=(255, 253, 248), outline=LINE)
-    draw.rounded_rectangle((right_x, toggle_y, right_x + toggle_w // 2, toggle_y + toggle_h), radius=7, fill=BLUE)
-    draw_text(draw, (right_x + toggle_w // 4 - 18, toggle_y + 9), "完成", 13, (255, 255, 255), True)
-    draw_text(draw, (right_x + toggle_w * 3 // 4 - 24, toggle_y + 9), "未完成", 13, TEXT, True)
-    draw_text(draw, (right_x, toggle_y + toggle_h + 18), "完成说明（可空）", 12, TEXT)
-    note_top = toggle_y + toggle_h + 40
-    note_bottom = note_top + (58 if compact else 75)
-    draw.rounded_rectangle((right_x, note_top, right_x + toggle_w, note_bottom), radius=7, fill=(255, 253, 248), outline=LINE)
-    if compact:
-        draw.rounded_rectangle((right_x, y1 - 75, right_x + toggle_w, y1 - 35), radius=7, fill=BLUE)
-        draw_text(draw, (right_x + toggle_w // 2 - 80, y1 - 64), "保存该项目 check-in", 13, (255, 255, 255), True)
-        return
-    draw_text(draw, (right_x, note_bottom + 14), "主观难度", 12, TEXT)
-    cells_y = note_bottom + 38
-    cell_w = toggle_w // 5
-    for i in range(5):
-        fill = BLUE if i == 2 else (255, 253, 248)
-        cell_h = 36 if compact else 42
-        draw.rectangle((right_x + i * cell_w, cells_y, right_x + (i + 1) * cell_w, cells_y + cell_h), fill=fill, outline=LINE)
-        draw_text(draw, (right_x + i * cell_w + cell_w // 2 - 5, cells_y + 11), str(i + 1), 14, (255, 255, 255) if i == 2 else TEXT, True)
+def draw_compact_feedback(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], compact: bool) -> None:
+    x0, y0, x1, y1 = box
+    draw.rounded_rectangle(box, radius=8, fill=(255, 252, 244), outline=None)
+    draw_text(draw, (x0 + 14, y0 + 12), "反馈修正", 14, TEXT, True)
+    button_h = 38
+    textarea_top = y0 + 42
+    textarea_bottom = max(textarea_top + 70, y1 - button_h - 26)
+    draw.rounded_rectangle((x0 + 14, textarea_top, x1 - 14, textarea_bottom), radius=7, fill=(255, 253, 246), outline=LINE)
+    draw.rounded_rectangle((x0 + 14, y1 - button_h - 14, x1 - 14, y1 - 14), radius=8, fill=BLUE)
+    draw_text(draw, (x0 + (x1 - x0) // 2 - 58, y1 - button_h - 3), "修正该项目目标", 12 if compact else 13, (255, 255, 255), True)
+
+
+def draw_compact_checkin(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], compact: bool) -> None:
+    x0, y0, x1, y1 = box
+    draw.rounded_rectangle(box, radius=8, fill=(255, 252, 244), outline=None)
+    draw_text(draw, (x0 + 14, y0 + 12), "Check-in", 14, TEXT, True)
+    draw_text(draw, (x0 + 14, y0 + 39), "完成状态", 11, MUTED)
+
+    inner_x0 = x0 + 14
+    inner_x1 = x1 - 14
+    toggle_y = y0 + 59
+    toggle_h = 34 if compact else 38
+    draw.rounded_rectangle((inner_x0, toggle_y, inner_x1, toggle_y + toggle_h), radius=8, fill=(255, 253, 246), outline=LINE)
+    draw.rounded_rectangle((inner_x0, toggle_y, inner_x0 + (inner_x1 - inner_x0) // 2, toggle_y + toggle_h), radius=8, fill=BLUE)
+    draw_text(draw, (inner_x0 + (inner_x1 - inner_x0) // 4 - 16, toggle_y + 8), "完成", 12, (255, 255, 255), True)
+    draw_text(draw, (inner_x0 + (inner_x1 - inner_x0) * 3 // 4 - 22, toggle_y + 8), "未完成", 12, TEXT, True)
+
+    note_y = toggle_y + toggle_h + 18
+    draw_text(draw, (inner_x0, note_y), "完成说明（可空）", 11, MUTED)
+    note_h = 50 if compact else 62
+    draw.rounded_rectangle((inner_x0, note_y + 20, inner_x1, note_y + 20 + note_h), radius=7, fill=(255, 253, 246), outline=LINE)
+
     if not compact:
-        draw.rounded_rectangle((right_x, cells_y + 73, right_x + toggle_w, cells_y + 148), radius=7, fill=(255, 253, 248), outline=LINE)
-    draw.rounded_rectangle((right_x, y1 - 75, right_x + toggle_w, y1 - 35), radius=7, fill=BLUE)
-    draw_text(draw, (right_x + toggle_w // 2 - 80, y1 - 64), "保存该项目 check-in", 13, (255, 255, 255), True)
+        difficulty_y = note_y + note_h + 34
+        draw_text(draw, (inner_x0, difficulty_y), "主观难度", 11, MUTED)
+        cells_y = difficulty_y + 22
+        cell_w = (inner_x1 - inner_x0) // 5
+        for i in range(5):
+            fill = BLUE if i == 2 else (255, 253, 246)
+            draw.rectangle((inner_x0 + i * cell_w, cells_y, inner_x0 + (i + 1) * cell_w, cells_y + 34), fill=fill, outline=LINE)
+            draw_text(draw, (inner_x0 + i * cell_w + cell_w // 2 - 4, cells_y + 8), str(i + 1), 12, (255, 255, 255) if i == 2 else TEXT, True)
+
+    button_h = 38
+    draw.rounded_rectangle((inner_x0, y1 - button_h - 14, inner_x1, y1 - 14), radius=8, fill=BLUE)
+    draw_text(draw, (x0 + (x1 - x0) // 2 - 70, y1 - button_h - 3), "保存该项目 check-in", 12 if compact else 13, (255, 255, 255), True)
 
 
 def today(size: tuple[int, int], path: Path) -> None:
@@ -378,9 +434,10 @@ def today(size: tuple[int, int], path: Path) -> None:
     shell_y = 136
     section_shell(img, left, shell_y, right, size[1] - 46, "TODAY", "今日目标")
 
-    card_w = right - left - 62
-    first_h = 850 if size[1] > 1100 else 620
-    draw_goal_card(img, (left + 42, shell_y + 96, left + 42 + card_w, shell_y + 96 + first_h), MOCK_GOALS[0], True)
+    outer = (left + 24, shell_y + 96, right - 24, size[1] - 72)
+    shadowed_round(img, outer, 8, CARD, None, 10)
+    inner = (outer[0] + 19, outer[1] + 19, outer[2] - 19, outer[3] - 19)
+    draw_goal_card(img, inner, MOCK_GOALS[0], True)
 
     wrap_with_readme_shadow(img).save(path, optimize=True)
 
