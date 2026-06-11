@@ -150,10 +150,10 @@ def shadowed_round(
 def wrap_with_readme_shadow(
     source: Image.Image,
     radius: int = 18,
-    padding: int = 34,
-    blur: int = 24,
-    alpha: int = 58,
-    offset: tuple[int, int] = (0, 14),
+    padding: int = 18,
+    blur: int = 10,
+    alpha: int = 44,
+    offset: tuple[int, int] = (0, 6),
 ) -> Image.Image:
     source = source.convert("RGBA")
     width, height = source.size

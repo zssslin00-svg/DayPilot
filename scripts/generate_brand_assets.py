@@ -71,7 +71,7 @@ def wrap_with_rounded_shadow(
     padding: int,
     blur: int,
     alpha: int,
-    offset: tuple[int, int] = (0, 18),
+    offset: tuple[int, int] = (0, 8),
 ) -> Image.Image:
     source = source.convert("RGBA")
     width, height = source.size
@@ -354,7 +354,7 @@ def create_banner() -> None:
     draw.text((678, 78), "AI", font=title_font, fill=(62, 88, 92, 130))
     draw.text((740, 88), "daily planning intelligence", font=subtitle_font, fill=(93, 109, 101, 110))
 
-    img = wrap_with_rounded_shadow(img, radius=42, padding=56, blur=30, alpha=72)
+    img = wrap_with_rounded_shadow(img, radius=38, padding=28, blur=14, alpha=48)
     img.save(BANNER_PATH, optimize=True)
 
 
