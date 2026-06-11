@@ -31,12 +31,21 @@ def load_daypilot_settings(
     *,
     env: Mapping[str, str] | None = None,
     dotenv_path: str | Path | None = None,
+    prefer_dotenv: bool | None = None,
 ) -> DayPilotSettings:
-    """Load settings from `.env`, then let real environment variables override them."""
+    """Load settings from `.env` and environment variables.
+
+    By default, real environment variables override `.env` for compatibility
+    with tests and command-line overrides. DayPilot launchers set
+    `DAYPILOT_PREFER_DOTENV=1` so the project/user `.env` remains authoritative
+    even when a shell profile has stale DeepSeek variables.
+    """
 
     source_env = dict(os.environ if env is None else env)
     file_env = _read_dotenv(Path(dotenv_path) if dotenv_path is not None else DEFAULT_ENV_PATH)
-    merged = {**file_env, **source_env}
+    if prefer_dotenv is None:
+        prefer_dotenv = _bool(source_env.get("DAYPILOT_PREFER_DOTENV"), default=False)
+    merged = _merge_settings_env(file_env, source_env, prefer_dotenv=prefer_dotenv)
 
     llm_mode = _choice(
         merged.get("DAYPILOT_LLM_MODE", "auto"),
@@ -77,6 +86,22 @@ def _read_dotenv(path: Path) -> dict[str, str]:
         if key:
             values[key] = value
     return values
+
+
+def _merge_settings_env(
+    file_env: Mapping[str, str],
+    source_env: Mapping[str, str],
+    *,
+    prefer_dotenv: bool,
+) -> dict[str, str]:
+    if not prefer_dotenv:
+        return {**file_env, **source_env}
+
+    merged = dict(source_env)
+    for key, value in file_env.items():
+        if str(value).strip():
+            merged[key] = value
+    return merged
 
 
 def _blank_to_none(value: str | None) -> str | None:

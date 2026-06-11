@@ -13,7 +13,7 @@ from backend.services.llm_client import DeepSeekJsonClient  # noqa: E402
 
 
 def main() -> None:
-    settings = load_daypilot_settings()
+    settings = load_daypilot_settings(dotenv_path=ROOT / ".env", prefer_dotenv=True)
     if not settings.deepseek_api_key:
         print("DEEPSEEK_API_KEY is not configured in .env or the environment.")
         raise SystemExit(2)

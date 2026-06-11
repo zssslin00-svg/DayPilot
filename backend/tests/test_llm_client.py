@@ -100,6 +100,60 @@ def test_dotenv_loads_and_environment_overrides() -> None:
         assert settings.llm_log_enabled is True
 
 
+def test_prefer_dotenv_keeps_project_key_over_environment() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        dotenv = Path(temp_dir) / ".env"
+        dotenv.write_text(
+            "\n".join(
+                [
+                    "DAYPILOT_LLM_MODE=deepseek",
+                    "DEEPSEEK_API_KEY=project-key-1234",
+                    "DEEPSEEK_MODEL=deepseek-v4-pro",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        settings = load_daypilot_settings(
+            env={
+                "DAYPILOT_PREFER_DOTENV": "1",
+                "DAYPILOT_LLM_MODE": "mock",
+                "DEEPSEEK_API_KEY": "bad-shell-key-mode",
+                "DEEPSEEK_MODEL": "bad-shell-model",
+            },
+            dotenv_path=dotenv,
+        )
+
+        assert settings.llm_mode == "deepseek"
+        assert settings.deepseek_api_key == "project-key-1234"
+        assert settings.deepseek_model == "deepseek-v4-pro"
+
+
+def test_prefer_dotenv_allows_environment_key_when_dotenv_key_is_blank() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        dotenv = Path(temp_dir) / ".env"
+        dotenv.write_text(
+            "\n".join(
+                [
+                    "DAYPILOT_LLM_MODE=deepseek",
+                    "DEEPSEEK_API_KEY=",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        settings = load_daypilot_settings(
+            env={
+                "DAYPILOT_PREFER_DOTENV": "1",
+                "DEEPSEEK_API_KEY": "shell-key-1234",
+            },
+            dotenv_path=dotenv,
+        )
+
+        assert settings.llm_mode == "deepseek"
+        assert settings.deepseek_api_key == "shell-key-1234"
+
+
 def test_mock_mode_never_calls_deepseek() -> None:
     original = urllib.request.urlopen
     try:
@@ -588,6 +642,8 @@ def _raise_if_called(*args: object, **kwargs: object) -> None:
 
 def main() -> None:
     test_dotenv_loads_and_environment_overrides()
+    test_prefer_dotenv_keeps_project_key_over_environment()
+    test_prefer_dotenv_allows_environment_key_when_dotenv_key_is_blank()
     test_mock_mode_never_calls_deepseek()
     test_auto_mode_without_key_falls_back_to_mock()
     test_deepseek_client_parses_valid_json_content()

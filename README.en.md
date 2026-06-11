@@ -58,7 +58,7 @@ DayPilot needs to know who you are, what you are working on, and how you like to
 
 | Entry | Where to enter it | What to enter | How the system uses it |
 | --- | --- | --- | --- |
-| DeepSeek config | `.env` | `DEEPSEEK_API_KEY`, model, and timeout settings | The API key must exist at startup. The real LLM path uses it to generate goals, interpret feedback, and generate weekly reports. |
+| DeepSeek config | `.env` | `DEEPSEEK_API_KEY`, model, and timeout settings | The API key is required only when `DAYPILOT_LLM_MODE=deepseek`. The real LLM path uses it to generate goals, interpret feedback, and generate weekly reports. |
 | Stable personal profile | `SOUL.md`, copied from `SOUL.example.md` | Long-term direction, current skills, personality and work style, development intentions, career values and constraints, current project boundaries, user preferences, avoid rules, time budget, and goal-generation principles | Read on every agent call as long-term context. Good for stable information, not for temporary same-day details. |
 | Career planning chat | Left-side **Career Planning** in the web app | Spare time, career questions, desired direction, current skills, and personality notes | Gives direction analysis, clarifying questions, project suggestions, risks, and next actions. New profile facts become pending suggestions first, then are written to SQLite and `SOUL.md` only after user confirmation. |
 | Project changes | Left-side **Project Update** in the web app | "Add project: ... current progress: ... goal: ...", or "this project is complete; the result is ..." | Written to the SQLite project table and reflected in the current-project section of `SOUL.md`. |
@@ -122,7 +122,7 @@ Do not put API keys, account passwords, or private tokens in `SOUL.md` or the RE
 
 ## Quick Start
 
-"Starts on any computer" means a Windows, macOS, or Linux machine with Python 3.10+, access to the DeepSeek API, and a valid `DEEPSEEK_API_KEY`. DayPilot currently does not require `npm install` or extra Python dependencies.
+"Starts on any computer" means a Windows, macOS, or Linux machine with Python 3.10+. Mock mode does not need a DeepSeek key; real DeepSeek mode needs access to the DeepSeek API and a valid `DEEPSEEK_API_KEY`. DayPilot currently does not require `npm install` or extra Python dependencies.
 
 ### Windows
 
@@ -164,13 +164,15 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-pro
 ```
 
-The startup script automatically checks `DEEPSEEK_API_KEY` in real LLM mode, backs up an existing database, initializes SQLite on first run, starts the backend at `http://127.0.0.1:8000`, starts the frontend at `http://127.0.0.1:5173/pages/index.html`, and opens the browser. With `--restart`, it stops old DayPilot processes first to avoid occupied ports, stale static assets, or duplicate services showing an outdated page.
+The source-development startup script always uses the repo-local `.env`, `SOUL.md`, and `data/` paths. It checks `DEEPSEEK_API_KEY` in real LLM mode, backs up an existing database, initializes SQLite on first run, starts the backend at `http://127.0.0.1:8000`, starts the frontend at `http://127.0.0.1:5173/pages/index.html`, and opens the browser. With `--restart`, it first stops old DayPilot development or packaged processes on the default ports to avoid occupied ports, stale static assets, or duplicate services showing an outdated page.
 
 Stop services:
 
 ```bat
 python scripts\stop_daypilot.py
 ```
+
+The stop script removes repo-local pid files and checks the default 8000/5173 ports for DayPilot processes.
 
 On macOS / Linux:
 
@@ -233,7 +235,7 @@ Core data flow:
 
 ## Packaging
 
-DayPilot can be packaged with PyInstaller as a Windows EXE or a macOS/Linux folder package. Build on the target OS: build Windows packages on Windows and macOS packages on macOS. The package entrypoint is `scripts/package_launcher.py`; it stores user data in the OS user-data directory instead of the install directory.
+DayPilot can be packaged with PyInstaller as a Windows EXE or a macOS/Linux folder package. Build on the target OS: build Windows packages on Windows and macOS packages on macOS. The package entrypoint is `scripts/package_launcher.py`; it stores user data in the OS user-data directory instead of the install directory. The source-development launcher still writes to repo-local `data/`.
 
 Windows:
 

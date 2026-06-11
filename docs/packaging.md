@@ -19,8 +19,8 @@ Run on Windows:
 
 ```bat
 cd /d D:\tools\vibe_coding\xiangmu\DayPilot
-C:\Users\lin\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -m pip install pyinstaller
-C:\Users\lin\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe scripts\build_windows.py
+python -m pip install pyinstaller
+python scripts\build_windows.py
 ```
 
 Output:
@@ -72,8 +72,9 @@ exports/packages/DayPilot-linux.zip
 ## Notes
 
 - The package is intentionally one-folder, not one-file. DayPilot has frontend files, schemas, prompts, SQLite data, and editable user profile files; one-folder keeps paths predictable.
+- `scripts/start_daypilot.py` is the source-development launcher and uses repo-local `.env`, `SOUL.md`, and `data/`; `scripts/package_launcher.py` is the packaged launcher and writes user data to the OS app-data directory.
 - Use `scripts/package_launcher.py --data-dir <path>` to test with a temporary user-data directory.
-- If ports `8000` or `5173` are already in use, stop the old DayPilot instance first or launch with custom ports:
+- If ports `8000` or `5173` are already in use, stop the old DayPilot instance first. In source development, `scripts\stop_daypilot.py` and `scripts\start_daypilot.py --restart` both check pid files and the default ports. For packaged runs, you can also launch with custom ports:
 
 ```bat
 DayPilot.exe --backend-port 18000 --frontend-port 15173

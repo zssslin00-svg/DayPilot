@@ -117,6 +117,7 @@ def prepare_user_runtime(app_root: Path, data_dir: Path) -> dict[str, Path]:
     os.environ.setdefault("DAYPILOT_ENV_PATH", str(env_path))
     os.environ.setdefault("DAYPILOT_SCHEMA_PATH", str(schema_path))
     os.environ.setdefault("DAYPILOT_LLM_LOG_DIR", str(data_dir / "llm_logs"))
+    os.environ["DAYPILOT_PREFER_DOTENV"] = "1"
 
     if str(app_root) not in sys.path:
         sys.path.insert(0, str(app_root))
