@@ -295,16 +295,15 @@ Windows 也可以使用：
 scripts\restore_latest_db.bat
 ```
 
-## 当前数据模型与同步规则
+## 数据怎么自动同步
 
-- 项目当前状态只以 `projects.project_state` 为准；`status_summary`、`planning_bias`、`source_payload` 不再作为 `projects` 表的持久列。API 为了兼容前端仍返回 `status_summary` 和 `planning_bias`，但它们是从 `project_state.summary` 和 `project_state.planning_guidance` 实时派生的。
-- `project_state` 记录项目摘要、规划指导、目标、事实列表和最近更新来源。项目更新、check-in 自动进度和旧数据迁移都会写入这个 canonical state，避免项目名、进度或目标被历史字段反向覆盖。
-- `SOUL.md` 的“当前项目”段落可作为 active 项目列表来源：编辑编号/项目符号列表后，在 Today 页点击“刷新”会导入新增、改名、优先级、进度和目标变化；列表里消失的 active 项目会标记为 completed，不会硬删除历史。
-- 项目名、项目摘要、规划指导、目标或优先级变化后，会触发当天对应项目的今日目标刷新。强制刷新不会 carry over 旧目标；普通 carry-over 也会用当前项目名重写目标标题。
-- History 区展示每个 `daily_goal` 当前的 active goal version。只要今日目标生成、重新生成或反馈修正产生新的 active version，前端会同步刷新 History；旧版本只保留在版本链里做审计。
-- 同一个 check-in 被编辑后，系统会替换同一 `source_type + source_id` 产生的项目进度 facts，避免旧 check-in 内容继续影响项目当前状态。
-- 职业画像的结构化字段保存在 `user_profile.career_profile`。职业规划聊天会保存 `career_chat_sessions` 和 `career_chat_messages`，但不会自动创建项目、刷新今日目标或写入 check-in。
-- 聊天中识别出的新技能、性格、发展意愿、偏好或约束，会先写入 `career_profile_update_suggestions`，状态为 `pending`。只有用户点击确认后，系统才会更新 SQLite 画像并同步 `SOUL.md` 的“当前技能点”“性格与工作方式”“发展意愿”“职业价值观与约束”章节；忽略建议不会改变画像。
+- 你不用记住数据库字段。DayPilot 会把项目的最新状态整理好，前端看到的项目摘要、进度和规划建议都从这里来。
+- 你可以在网页里更新项目，也可以直接改 `SOUL.md` 的“当前项目”。点 Today 页的“刷新”后，新项目会导入，改名、进度和优先级会同步；从列表里移走的项目会标记完成，不会删掉历史。
+- 项目发生明显变化时，今天的目标会跟着刷新，避免继续沿用旧项目名或过期目标。
+- 每次生成、重新生成或用反馈修正今日目标，History 都会显示当前最新版本；旧版本还留在后台，方便以后回看。
+- 如果你编辑了当天 check-in，系统会用新内容替换旧进展，不会让过期记录继续影响项目状态。
+- 职业规划聊天会保存对话，也会识别可能值得沉淀的新技能、偏好、约束或发展方向；这些只会先变成“待确认建议”。
+- 只有你确认建议后，DayPilot 才会更新个人画像并同步到 `SOUL.md`；忽略建议不会改变画像，也不会自动创建项目、刷新目标或写 check-in。
 
 ## API Surface
 

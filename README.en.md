@@ -295,15 +295,15 @@ Windows can also use:
 scripts\restore_latest_db.bat
 ```
 
-## Current Data Model And Sync Rules
+## How Data Stays In Sync
 
-- The current project state is canonical in `projects.project_state`; compatibility fields such as `status_summary` and `planning_bias` are derived from that JSON state for API responses.
-- `project_state` stores project summaries, planning guidance, targets, facts, and recent update sources. Project updates, check-in progress, and migration logic write to this canonical state so old historical fields do not overwrite current project intent.
-- The `Current Projects` section in `SOUL.md` can act as the active-project list: edit its numbered/bulleted list, then click **Refresh** on the Today page to import additions, renames, priority, progress, and target changes. Active projects removed from that list are marked `completed`, not hard-deleted.
-- Changes to project names, summaries, planning guidance, targets, or priority can refresh the corresponding daily goal for the current day.
-- The History view shows the current active goal version for each `daily_goal`; older versions remain in the version chain for audit.
-- Structured career profile data is stored in `user_profile.career_profile`. Career chat stores `career_chat_sessions` and `career_chat_messages`, but it does not automatically create projects, refresh today's goal, or write check-ins.
-- New skills, personality traits, development intentions, preferences, or constraints discovered during chat are saved first as `career_profile_update_suggestions` with `pending` status. Only after user confirmation does the system merge them into SQLite and sync the `Current Skills`, `Personality And Work Style`, `Development Intentions`, and `Career Values And Constraints` sections of `SOUL.md`; dismissed suggestions do not change the profile.
+- You do not need to remember database fields. DayPilot keeps the latest project state organized, and the project summary, progress, and planning guidance shown in the app come from that state.
+- You can update projects in the web app, or edit the `Current Projects` section in `SOUL.md`. After you click **Refresh** on the Today page, new projects are imported, renames, progress, and priority changes are synced, and projects removed from the list are marked completed instead of deleted.
+- When a project changes in a meaningful way, today's goal can refresh too, so DayPilot does not keep using an old project name or stale goal.
+- Every time today's goal is generated, regenerated, or revised with feedback, History shows the latest version. Older versions stay in the background for later review.
+- If you edit today's check-in, the new content replaces the old progress update, so outdated notes do not keep affecting the project.
+- Career planning chat saves the conversation and can notice new skills, preferences, constraints, or development directions worth keeping. Those become pending suggestions first.
+- DayPilot updates your personal profile and syncs it to `SOUL.md` only after you confirm a suggestion. Dismissing a suggestion does not change the profile, create projects, refresh goals, or write check-ins.
 
 ## API Surface
 
