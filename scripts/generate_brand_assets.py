@@ -65,6 +65,36 @@ def rounded_shadow(
     base.alpha_composite(layer.filter(ImageFilter.GaussianBlur(blur)))
 
 
+def wrap_with_rounded_shadow(
+    source: Image.Image,
+    radius: int,
+    padding: int,
+    blur: int,
+    alpha: int,
+    offset: tuple[int, int] = (0, 18),
+) -> Image.Image:
+    source = source.convert("RGBA")
+    width, height = source.size
+    wrapped = Image.new("RGBA", (width + padding * 2, height + padding * 2), (0, 0, 0, 0))
+
+    shadow = Image.new("RGBA", wrapped.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(shadow)
+    shadow_box = (
+        padding + offset[0],
+        padding + offset[1],
+        padding + offset[0] + width,
+        padding + offset[1] + height,
+    )
+    draw.rounded_rectangle(shadow_box, radius=radius, fill=(73, 61, 42, alpha))
+    wrapped.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(blur)))
+
+    mask = Image.new("L", source.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle((0, 0, width, height), radius=radius, fill=255)
+    wrapped.paste(source, (padding, padding), mask)
+    return wrapped
+
+
 def line_with_glow(
     base: Image.Image,
     points: list[tuple[float, float]],
@@ -182,8 +212,7 @@ def draw_small_token(base: Image.Image, cx: int, cy: int, r: int, kind: str) -> 
 
 def create_logo() -> None:
     size = 1024
-    img = Image.new("RGBA", (size, size), (255, 255, 255, 255))
-    draw_vertical_gradient(img, (255, 254, 250), (247, 241, 229))
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     cx, cy = size // 2, size // 2
@@ -208,8 +237,8 @@ def create_logo() -> None:
     for p1, p2 in [((404, 426), (512, 360)), ((512, 360), (612, 392)), ((612, 392), (574, 594)), ((574, 594), (452, 602)), ((452, 602), (404, 426))]:
         draw.line([p1, p2], fill=(103, 149, 166, 105), width=3)
 
-    img = img.resize((512, 512), Image.Resampling.LANCZOS).convert("RGB")
-    img.save(LOGO_PATH, quality=94, optimize=True)
+    img = img.resize((512, 512), Image.Resampling.LANCZOS)
+    img.save(LOGO_PATH, optimize=True)
 
 
 def draw_card(base: Image.Image, box: tuple[int, int, int, int], radius: int = 34) -> None:
@@ -325,8 +354,8 @@ def create_banner() -> None:
     draw.text((678, 78), "AI", font=title_font, fill=(62, 88, 92, 130))
     draw.text((740, 88), "daily planning intelligence", font=subtitle_font, fill=(93, 109, 101, 110))
 
-    img = img.convert("RGB")
-    img.save(BANNER_PATH, quality=92, optimize=True)
+    img = wrap_with_rounded_shadow(img, radius=42, padding=56, blur=30, alpha=72)
+    img.save(BANNER_PATH, optimize=True)
 
 
 def main() -> None:

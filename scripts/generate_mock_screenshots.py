@@ -147,6 +147,39 @@ def shadowed_round(
     draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline or fill, width=1)
 
 
+def wrap_with_readme_shadow(
+    source: Image.Image,
+    radius: int = 18,
+    padding: int = 34,
+    blur: int = 24,
+    alpha: int = 58,
+    offset: tuple[int, int] = (0, 14),
+) -> Image.Image:
+    source = source.convert("RGBA")
+    width, height = source.size
+    wrapped = Image.new("RGBA", (width + padding * 2, height + padding * 2), (0, 0, 0, 0))
+
+    shadow = Image.new("RGBA", wrapped.size, (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow)
+    shadow_draw.rounded_rectangle(
+        (
+            padding + offset[0],
+            padding + offset[1],
+            padding + offset[0] + width,
+            padding + offset[1] + height,
+        ),
+        radius=radius,
+        fill=(73, 61, 42, alpha),
+    )
+    wrapped.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(blur)))
+
+    mask = Image.new("L", source.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle((0, 0, width, height), radius=radius, fill=255)
+    wrapped.paste(source, (padding, padding), mask)
+    return wrapped
+
+
 def draw_text(
     draw: ImageDraw.ImageDraw,
     xy: tuple[int, int],
@@ -352,7 +385,7 @@ def today(size: tuple[int, int], path: Path) -> None:
     if second_y < size[1] - 80:
         draw_goal_card(img, (left + 42, second_y, left + 42 + card_w, second_y + 260), MOCK_GOALS[1], False)
 
-    img.convert("RGB").save(path, quality=92, optimize=True)
+    wrap_with_readme_shadow(img).save(path, optimize=True)
 
 
 def history(size: tuple[int, int], path: Path) -> None:
@@ -389,7 +422,7 @@ def history(size: tuple[int, int], path: Path) -> None:
         if y < list_y1 - 20:
             draw.line((list_x0 + 18, y - 16, list_x1 - 18, y - 16), fill=LINE)
 
-    img.convert("RGB").save(path, quality=92, optimize=True)
+    wrap_with_readme_shadow(img).save(path, optimize=True)
 
 
 def main() -> None:
