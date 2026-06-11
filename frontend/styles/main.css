@@ -773,13 +773,28 @@ button:focus-visible {
 .project-columns section,
 .project-list {
   display: grid;
+  align-content: start;
   gap: 10px;
 }
 
 .project-item {
   display: grid;
-  gap: 9px;
-  padding: 13px;
+  align-self: start;
+  gap: 7px;
+  padding: 10px 12px;
+}
+
+.project-item .history-head {
+  justify-content: flex-start;
+  gap: 8px 10px;
+}
+
+.project-item .history-head strong {
+  flex: 0 1 auto;
+}
+
+.project-item .history-head span {
+  flex: 0 0 auto;
 }
 
 .project-form {
