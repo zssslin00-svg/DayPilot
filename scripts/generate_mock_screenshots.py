@@ -381,9 +381,6 @@ def today(size: tuple[int, int], path: Path) -> None:
     card_w = right - left - 62
     first_h = 850 if size[1] > 1100 else 620
     draw_goal_card(img, (left + 42, shell_y + 96, left + 42 + card_w, shell_y + 96 + first_h), MOCK_GOALS[0], True)
-    second_y = shell_y + 116 + first_h
-    if second_y < size[1] - 80:
-        draw_goal_card(img, (left + 42, second_y, left + 42 + card_w, second_y + 260), MOCK_GOALS[1], False)
 
     wrap_with_readme_shadow(img).save(path, optimize=True)
 
@@ -427,7 +424,7 @@ def history(size: tuple[int, int], path: Path) -> None:
 
 def main() -> None:
     ASSET_DIR.mkdir(parents=True, exist_ok=True)
-    today((1265, 1300), ASSET_DIR / "daypilot-screenshot-today.png")
+    today((1265, 1140), ASSET_DIR / "daypilot-screenshot-today.png")
     history((1265, 1133), ASSET_DIR / "daypilot-screenshot-history.png")
     today((1280, 900), ASSET_DIR / "daypilot-today-desktop.png")
     history((1100, 1150), ASSET_DIR / "daypilot-history-desktop.png")
