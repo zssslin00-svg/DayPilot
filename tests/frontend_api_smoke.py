@@ -216,6 +216,7 @@ def main() -> None:
                 'id="weekly-completed-work"',
                 'id="weekly-next-plan"',
                 'id="weekly-reflection"',
+                "Check-in 仅在完成当天可以修改，过后只展示最新可用版本。",
             ]:
                 assert marker in homepage, f"homepage missing {marker}"
             assert "model_name" not in homepage
