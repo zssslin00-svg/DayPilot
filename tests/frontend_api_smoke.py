@@ -216,6 +216,13 @@ def main() -> None:
                 assert marker in homepage, f"homepage missing {marker}"
             assert "model_name" not in homepage
             assert "llm_metadata" not in homepage
+            frontend_js = _read_text(f"{frontend_base}/services/today-goal.js")
+            for marker in [
+                "checkedInGoalIds",
+                "renderVisibleTodayGoalCards",
+                "今天的项目都已 check-in",
+            ]:
+                assert marker in frontend_js, f"frontend JS missing {marker}"
 
             status, project_create = _post_json(
                 f"{backend_base}/api/projects/lifecycle",
@@ -307,6 +314,8 @@ def main() -> None:
                 if record["daily_goal"]["id"] == goal_id
             )
             assert friday["checkin_editable"] is True
+            assert friday["daily_checkin"] is not None
+            assert friday["daily_goal"]["status"] == "checked_in"
             status, edit_payload = _post_json(
                 f"{backend_base}/api/checkin",
                 {
@@ -320,6 +329,16 @@ def main() -> None:
             assert status == 200
             assert edit_payload["updated"] is True
             assert edit_payload["weekly_report_refresh"]["status"] == "refreshed"
+            status, edited_history_payload = _get_json(f"{backend_base}/api/history?days=7")
+            assert status == 200
+            edited_friday = next(
+                record
+                for record in edited_history_payload["daily_records"]
+                if record["daily_goal"]["id"] == goal_id
+            )
+            assert edited_friday["checkin_editable"] is True
+            assert edited_friday["daily_goal"]["status"] == "checked_in"
+            assert edited_friday["daily_checkin"]["completion_text"] == "Edited smoke check-in with a clearer artifact trail."
 
             status, feedback_report = _post_json(
                 f"{backend_base}/api/weekly-report/feedback",

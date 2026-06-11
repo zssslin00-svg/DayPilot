@@ -56,6 +56,8 @@ const elements = {
 let currentGoalRecord = null;
 let currentGoalRecords = [];
 let currentApiDate = null;
+let checkedInGoalDate = null;
+let checkedInGoalIds = new Set();
 let currentWeekId = null;
 let canGenerateWeeklyReport = false;
 let latestWeeklyBundle = null;
@@ -281,6 +283,7 @@ async function renderTodayGoalAndSyncHistory(payload) {
 
 function renderTodayGoal(payload) {
   currentApiDate = payload.date || null;
+  resetCheckedInGoalsForDate(currentApiDate);
 
   if (payload.is_workday === false) {
     renderGoalEmpty(payload.message || "今天不是工作日。");
@@ -294,19 +297,9 @@ function renderTodayGoal(payload) {
   }
 
   currentGoalRecords = goalRecords;
-  currentGoalRecord = goalRecords[0];
+  markCheckedInGoalsFromRecords(goalRecords);
   currentWeekId = goalRecords[0]?.daily_goal?.week_id || null;
-  elements.todayEmpty.hidden = true;
-  elements.goalContent.hidden = false;
-  const legacyTaskGrid = elements.checkinForm?.closest(".task-grid");
-  if (legacyTaskGrid) {
-    legacyTaskGrid.hidden = true;
-  }
-  elements.goalContent.replaceChildren();
-  elements.goalContent.className = "project-goal-list";
-  goalRecords.forEach((goalRecord) => {
-    elements.goalContent.append(projectGoalCard(goalRecord, payload.date));
-  });
+  renderVisibleTodayGoalCards(payload.date);
   setTodayFormsEnabled(false);
   const generatedThisRequest =
     Boolean(payload.created) ||
@@ -324,15 +317,98 @@ function renderTodayGoal(payload) {
   }
 }
 
+function renderVisibleTodayGoalCards(fallbackDate = currentApiDate) {
+  const visibleGoalRecords = currentGoalRecords.filter((goalRecord) => !isCheckedInGoalRecord(goalRecord));
+  currentGoalRecord = visibleGoalRecords[0] || null;
+  elements.goalContent.replaceChildren();
+
+  if (!visibleGoalRecords.length) {
+    renderGoalEmpty("今天的项目都已 check-in，记录可在历史中修改。");
+    return visibleGoalRecords;
+  }
+
+  elements.todayEmpty.hidden = true;
+  elements.goalContent.hidden = false;
+  const legacyTaskGrid = elements.checkinForm?.closest(".task-grid");
+  if (legacyTaskGrid) {
+    legacyTaskGrid.hidden = true;
+  }
+  elements.goalContent.className = "project-goal-list";
+  visibleGoalRecords.forEach((goalRecord) => {
+    elements.goalContent.append(projectGoalCard(goalRecord, fallbackDate));
+  });
+  return visibleGoalRecords;
+}
+
 function renderGoalEmpty(message) {
   elements.todayEmpty.textContent = message;
   elements.todayEmpty.hidden = false;
   elements.goalContent.hidden = true;
+  elements.goalContent.replaceChildren();
   const legacyTaskGrid = elements.checkinForm?.closest(".task-grid");
   if (legacyTaskGrid) {
     legacyTaskGrid.hidden = true;
   }
   setTodayFormsEnabled(false);
+}
+
+function resetCheckedInGoalsForDate(goalDate) {
+  if (!goalDate) {
+    checkedInGoalDate = null;
+    checkedInGoalIds = new Set();
+    return;
+  }
+  if (checkedInGoalDate !== goalDate) {
+    checkedInGoalDate = goalDate;
+    checkedInGoalIds = new Set();
+  }
+}
+
+function markCheckedInGoalsFromRecords(records) {
+  records.forEach((record) => {
+    const goalId = goalIdFromRecord(record);
+    if (!goalId) {
+      return;
+    }
+    const status = String(record?.daily_goal?.status || "");
+    if (status === "checked_in" || record?.daily_checkin) {
+      checkedInGoalIds.add(goalId);
+    }
+  });
+}
+
+function markTodayGoalCheckedIn(goalId, checkin) {
+  const normalizedGoalId = Number(goalId);
+  if (!Number.isFinite(normalizedGoalId)) {
+    return;
+  }
+  checkedInGoalIds.add(normalizedGoalId);
+  currentGoalRecords = currentGoalRecords.map((goalRecord) => {
+    if (goalIdFromRecord(goalRecord) !== normalizedGoalId) {
+      return goalRecord;
+    }
+    return {
+      ...goalRecord,
+      daily_goal: {
+        ...(goalRecord.daily_goal || {}),
+        status: "checked_in",
+        checked_in_at: checkin?.updated_at || checkin?.created_at || goalRecord.daily_goal?.checked_in_at || null,
+      },
+      daily_checkin: checkin || goalRecord.daily_checkin || null,
+    };
+  });
+  renderVisibleTodayGoalCards(currentApiDate);
+}
+
+function isCheckedInGoalRecord(goalRecord) {
+  const goalId = goalIdFromRecord(goalRecord);
+  const status = String(goalRecord?.daily_goal?.status || "");
+  return Boolean(goalId && checkedInGoalIds.has(goalId)) || status === "checked_in" || Boolean(goalRecord?.daily_checkin);
+}
+
+function goalIdFromRecord(goalRecord) {
+  const goalId = Number(goalRecord?.daily_goal?.id);
+  return Number.isFinite(goalId) ? goalId : null;
 }
 
 function projectGoalCard(goalRecord, fallbackDate) {
@@ -588,6 +664,7 @@ async function saveCheckin(body, button) {
       method: "POST",
       body,
     });
+    markTodayGoalCheckedIn(payload.checkin?.daily_goal_id || body.goal_id, payload.checkin);
     canGenerateWeeklyReport = Boolean(payload.can_generate_weekly_report);
     updateWeeklyGenerateButton();
     await loadHistory();
@@ -827,36 +904,31 @@ function syncTodayCheckin(records) {
   }
   const todayRecords = records.filter((record) => record.daily_goal?.goal_date === currentApiDate);
   const byGoalId = new Map(
-    todayRecords.map((record) => [Number(record.daily_goal?.id), record.daily_checkin]),
+    todayRecords.map((record) => [Number(record.daily_goal?.id), record]),
   );
-  currentGoalRecords.forEach((goalRecord) => {
-    const goalId = Number(goalRecord.daily_goal?.id);
-    const form = elements.goalContent.querySelector(`form[data-goal-id="${goalId}"]`);
-    const checkin = byGoalId.get(goalId);
-    if (!form || !checkin) {
-      return;
-    }
-    const completion = form.querySelector('textarea[name="completion_text"]');
-    const tomorrow = form.querySelector('textarea[name="tomorrow_direction"]');
-    if (completion) {
-      completion.value = checkin.completion_text || "";
-    }
-    if (tomorrow) {
-      tomorrow.value = checkin.tomorrow_direction || "";
-    }
-    const status = form.querySelector(
-      `input[name="completion_status_${goalId}"][value="${checkin.completion_status || "completed"}"]`,
-    );
-    if (status) {
-      status.checked = true;
-    }
-    const difficulty = form.querySelector(
-      `input[name="felt_difficulty_${goalId}"][value="${checkin.felt_difficulty || 3}"]`,
-    );
-    if (difficulty) {
-      difficulty.checked = true;
+  todayRecords.forEach((record) => {
+    const goalId = Number(record.daily_goal?.id);
+    if (Number.isFinite(goalId) && (record.daily_checkin || record.daily_goal?.status === "checked_in")) {
+      checkedInGoalIds.add(goalId);
     }
   });
+  if (currentGoalRecords.length) {
+    currentGoalRecords = currentGoalRecords.map((goalRecord) => {
+      const historyRecord = byGoalId.get(goalIdFromRecord(goalRecord));
+      if (!historyRecord) {
+        return goalRecord;
+      }
+      return {
+        ...goalRecord,
+        daily_goal: {
+          ...(goalRecord.daily_goal || {}),
+          ...(historyRecord.daily_goal || {}),
+        },
+        daily_checkin: historyRecord.daily_checkin || goalRecord.daily_checkin || null,
+      };
+    });
+    renderVisibleTodayGoalCards(currentApiDate);
+  }
   canGenerateWeeklyReport = Boolean(
     todayRecords.length &&
       todayRecords.every((record) => record.daily_checkin) &&
