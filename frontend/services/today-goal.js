@@ -416,8 +416,7 @@ function markCheckedInGoalsFromRecords(records) {
     if (!goalId) {
       return;
     }
-    const status = String(record?.daily_goal?.status || "");
-    if (status === "checked_in" || record?.daily_checkin) {
+    if (record?.daily_checkin) {
       checkedInGoalIds.add(goalId);
     }
   });
@@ -448,8 +447,7 @@ function markTodayGoalCheckedIn(goalId, checkin) {
 
 function isCheckedInGoalRecord(goalRecord) {
   const goalId = goalIdFromRecord(goalRecord);
-  const status = String(goalRecord?.daily_goal?.status || "");
-  return Boolean(goalId && checkedInGoalIds.has(goalId)) || status === "checked_in" || Boolean(goalRecord?.daily_checkin);
+  return Boolean(goalId && checkedInGoalIds.has(goalId)) || Boolean(goalRecord?.daily_checkin);
 }
 
 function goalIdFromRecord(goalRecord) {
@@ -954,8 +952,12 @@ function syncTodayCheckin(records) {
   );
   todayRecords.forEach((record) => {
     const goalId = Number(record.daily_goal?.id);
-    if (Number.isFinite(goalId) && (record.daily_checkin || record.daily_goal?.status === "checked_in")) {
-      checkedInGoalIds.add(goalId);
+    if (Number.isFinite(goalId)) {
+      if (record.daily_checkin) {
+        checkedInGoalIds.add(goalId);
+      } else {
+        checkedInGoalIds.delete(goalId);
+      }
     }
   });
   if (currentGoalRecords.length) {
@@ -970,7 +972,7 @@ function syncTodayCheckin(records) {
           ...(goalRecord.daily_goal || {}),
           ...(historyRecord.daily_goal || {}),
         },
-        daily_checkin: historyRecord.daily_checkin || goalRecord.daily_checkin || null,
+        daily_checkin: historyRecord.daily_checkin || null,
       };
     });
     renderVisibleTodayGoalCards(currentApiDate);

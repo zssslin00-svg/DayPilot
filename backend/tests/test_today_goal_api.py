@@ -416,7 +416,119 @@ def test_workday_today_goal_reads_existing_goal() -> None:
         assert payload["goal"]["daily_goal"]["goal_date"] == "2026-06-08"
         assert payload["goal"]["daily_goal"]["is_workday"] == 1
         assert payload["goal"]["active_version"]["main_goal"] == "Implement workday policy."
+        assert payload["goal"]["daily_checkin"] is None
         validate_daily_goal_output(payload["goal"]["goal_output"])
+
+
+def test_workday_today_goal_includes_existing_checkin() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = Path(temp_dir) / "daypilot-checked-in-test.sqlite3"
+        connection = initialize_database(db_path)
+        try:
+            with connection:
+                repo.create_user_profile(
+                    connection,
+                    id=1,
+                    long_term_direction="Build a useful daily goal loop.",
+                )
+                daily_goal_id = repo.create_daily_goal(
+                    connection,
+                    goal_date="2026-06-08",
+                    context_snapshot={"source": "test"},
+                    generated_at="2026-06-08 09:00:00",
+                )
+                repo.create_goal_version(
+                    connection,
+                    daily_goal_id=daily_goal_id,
+                    version_no=1,
+                    is_active=1,
+                    main_goal="Return check-in state with the today goal.",
+                    goal_reason="The frontend should not guess from goal status.",
+                    success_criteria=["Payload includes daily_checkin"],
+                    estimated_minutes=45,
+                    difficulty_level=2,
+                    minimum_version="Today API returns the persisted check-in.",
+                    goal_type="coding",
+                    revision_source="initial_generation",
+                )
+                repo.create_daily_checkin(
+                    connection,
+                    daily_goal_id=daily_goal_id,
+                    checkin_date="2026-06-08",
+                    week_id="2026-W24",
+                    completion_text="Submitted the real check-in.",
+                    felt_difficulty=2,
+                    parsed_completion_rate=1.0,
+                    completed_items=["check-in state"],
+                    unfinished_items=[],
+                    blockers=[],
+                    actual_outputs=["today API payload"],
+                    processor_snapshot={"source": "test"},
+                    created_at="2026-06-08 18:00:00",
+                )
+        finally:
+            connection.close()
+
+        status, payload = _get_today_goal(date(2026, 6, 8), db_path)
+
+        assert status == 200
+        assert payload["created"] is False
+        assert payload["goal"]["daily_goal"]["status"] == "checked_in"
+        assert payload["goal"]["daily_checkin"]["daily_goal_id"] == daily_goal_id
+        assert payload["goal"]["daily_checkin"]["completion_text"] == "Submitted the real check-in."
+
+
+def test_workday_today_goal_repairs_stale_checked_in_status_without_checkin() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = Path(temp_dir) / "daypilot-stale-checkin-status.sqlite3"
+        connection = initialize_database(db_path)
+        try:
+            with connection:
+                repo.create_user_profile(
+                    connection,
+                    id=1,
+                    long_term_direction="Build a useful daily goal loop.",
+                )
+                daily_goal_id = repo.create_daily_goal(
+                    connection,
+                    goal_date="2026-06-08",
+                    status="checked_in",
+                    checked_in_at="2026-06-08 18:00:00",
+                    context_snapshot={"source": "test"},
+                    generated_at="2026-06-08 09:00:00",
+                )
+                repo.create_goal_version(
+                    connection,
+                    daily_goal_id=daily_goal_id,
+                    version_no=1,
+                    is_active=1,
+                    main_goal="Do not hide goals without a check-in row.",
+                    goal_reason="The actual check-in table is the source of truth.",
+                    success_criteria=["Stale status is repaired"],
+                    estimated_minutes=45,
+                    difficulty_level=2,
+                    minimum_version="Today API shows the goal as active.",
+                    goal_type="coding",
+                    revision_source="initial_generation",
+                )
+        finally:
+            connection.close()
+
+        status, payload = _get_today_goal(date(2026, 6, 8), db_path)
+
+        assert status == 200
+        assert payload["created"] is False
+        assert payload["goal"]["daily_goal"]["status"] == "active"
+        assert payload["goal"]["daily_goal"]["checked_in_at"] is None
+        assert payload["goal"]["daily_checkin"] is None
+
+        connection = connect_database(db_path)
+        try:
+            repaired_goal = repo.get_daily_goal(connection, daily_goal_id)
+            assert repaired_goal["status"] == "active"
+            assert repaired_goal["checked_in_at"] is None
+        finally:
+            connection.close()
 
 
 def test_workday_generation_reads_required_context() -> None:
@@ -635,6 +747,8 @@ def main() -> None:
     test_workday_today_goal_normalizes_deepseek_schema_shape_without_mock_fallback()
     test_regenerate_today_goal_replaces_existing_mock_goal_with_deepseek_version()
     test_workday_today_goal_reads_existing_goal()
+    test_workday_today_goal_includes_existing_checkin()
+    test_workday_today_goal_repairs_stale_checked_in_status_without_checkin()
     test_workday_generation_reads_required_context()
     test_multi_project_generation_and_next_day_carryover()
     print("PASS: GET /api/today-goal generates, persists, reuses, and reads required context")

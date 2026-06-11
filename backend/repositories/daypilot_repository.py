@@ -810,6 +810,15 @@ def get_daily_checkin_by_date(connection: sqlite3.Connection, checkin_date: str)
     )
 
 
+def get_daily_checkin_for_goal(connection: sqlite3.Connection, daily_goal_id: int) -> Record | None:
+    return _fetch_one(
+        connection,
+        "daily_checkins",
+        "SELECT * FROM daily_checkins WHERE daily_goal_id = ?",
+        (daily_goal_id,),
+    )
+
+
 def list_daily_checkins_by_date(connection: sqlite3.Connection, checkin_date: str) -> list[Record]:
     return _fetch_all(
         connection,
@@ -1451,6 +1460,7 @@ def get_goal_with_active_version_by_date(connection: sqlite3.Connection, goal_da
     daily_goal = get_daily_goal_by_date(connection, goal_date)
     if daily_goal is None:
         return None
+    daily_goal_id = int(daily_goal["id"])
     active_version = None
     if daily_goal["active_version_id"] is not None:
         active_version = get_goal_version(connection, int(daily_goal["active_version_id"]))
@@ -1458,6 +1468,7 @@ def get_goal_with_active_version_by_date(connection: sqlite3.Connection, goal_da
         "daily_goal": daily_goal,
         "project": get_project(connection, int(daily_goal["project_id"])),
         "active_version": active_version,
+        "daily_checkin": get_daily_checkin_for_goal(connection, daily_goal_id),
     }
 
 
@@ -1469,6 +1480,7 @@ def get_goal_with_active_version_by_date_and_project(
     daily_goal = get_daily_goal_by_date_and_project(connection, goal_date, project_id)
     if daily_goal is None:
         return None
+    daily_goal_id = int(daily_goal["id"])
     active_version = None
     if daily_goal["active_version_id"] is not None:
         active_version = get_goal_version(connection, int(daily_goal["active_version_id"]))
@@ -1476,12 +1488,14 @@ def get_goal_with_active_version_by_date_and_project(
         "daily_goal": daily_goal,
         "project": get_project(connection, int(daily_goal["project_id"])),
         "active_version": active_version,
+        "daily_checkin": get_daily_checkin_for_goal(connection, daily_goal_id),
     }
 
 
 def list_goal_records_by_date(connection: sqlite3.Connection, goal_date: str) -> list[Record]:
     records: list[Record] = []
     for daily_goal in list_daily_goals_by_date(connection, goal_date):
+        daily_goal_id = int(daily_goal["id"])
         active_version = None
         if daily_goal["active_version_id"] is not None:
             active_version = get_goal_version(connection, int(daily_goal["active_version_id"]))
@@ -1490,6 +1504,7 @@ def list_goal_records_by_date(connection: sqlite3.Connection, goal_date: str) ->
                 "daily_goal": daily_goal,
                 "project": get_project(connection, int(daily_goal["project_id"])),
                 "active_version": active_version,
+                "daily_checkin": get_daily_checkin_for_goal(connection, daily_goal_id),
             }
         )
     return records

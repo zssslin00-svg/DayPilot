@@ -35,6 +35,7 @@ def initialize_database(
     _migrate_project_scoped_daily_goals(connection)
     _migrate_project_checkins_completion_status(connection)
     _migrate_career_planning_schema(connection)
+    _repair_daily_goal_checkin_status(connection)
     return connection
 
 
@@ -461,6 +462,50 @@ def _migrate_career_planning_schema(connection: sqlite3.Connection) -> None:
             connection.execute(
                 "ALTER TABLE user_profile ADD COLUMN career_profile TEXT NOT NULL DEFAULT '{}'"
             )
+
+
+def _repair_daily_goal_checkin_status(connection: sqlite3.Connection) -> None:
+    daily_goal_columns = _table_columns(connection, "daily_goals")
+    checkin_columns = _table_columns(connection, "daily_checkins")
+    if not {"status", "checked_in_at"} <= daily_goal_columns or "daily_goal_id" not in checkin_columns:
+        return
+
+    with connection:
+        connection.execute(
+            """
+            UPDATE daily_goals
+            SET status = 'active',
+                checked_in_at = NULL,
+                updated_at = datetime('now')
+            WHERE status = 'checked_in'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM daily_checkins
+                WHERE daily_checkins.daily_goal_id = daily_goals.id
+              )
+            """
+        )
+        connection.execute(
+            """
+            UPDATE daily_goals
+            SET status = 'checked_in',
+                checked_in_at = COALESCE(
+                  checked_in_at,
+                  (
+                    SELECT COALESCE(daily_checkins.updated_at, daily_checkins.created_at)
+                    FROM daily_checkins
+                    WHERE daily_checkins.daily_goal_id = daily_goals.id
+                  )
+                ),
+                updated_at = datetime('now')
+            WHERE status = 'active'
+              AND EXISTS (
+                SELECT 1
+                FROM daily_checkins
+                WHERE daily_checkins.daily_goal_id = daily_goals.id
+              )
+            """
+        )
 
 
 def _table_columns(connection: sqlite3.Connection, table: str) -> set[str]:
