@@ -126,6 +126,8 @@ Do not put API keys, account passwords, or private tokens in `SOUL.md` or the RE
 
 "Starts on any computer" means a Windows, macOS, or Linux machine with Python 3.10+. Mock mode does not need a DeepSeek key; real DeepSeek mode needs access to the DeepSeek API and a valid `DEEPSEEK_API_KEY`. DayPilot currently does not require `npm install` or extra Python dependencies.
 
+> **Important: after configuring the API key, return to the DayPilot page and click the Refresh button so the new configuration and latest context take effect.**
+
 ### Windows
 
 ```bat
@@ -321,5 +323,3 @@ scripts\restore_latest_db.bat
 ## Links
 
 - [SOUL.example.md](SOUL.example.md)
-- [Evaluation Runbook](docs/evaluation/eval_runbook.md)
-- [One-Week Trial Runbook](docs/evaluation/one_week_trial_runbook.md)
