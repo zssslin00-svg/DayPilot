@@ -56,10 +56,7 @@ const elements = {
   careerMessageList: document.querySelector("#career-message-list"),
   careerForm: document.querySelector("#career-chat-form"),
   careerMessage: document.querySelector("#career-chat-message"),
-  careerAvailableMinutes: document.querySelector("#career-available-minutes"),
   careerSubmit: document.querySelector("#career-chat-submit"),
-  careerResults: document.querySelector("#career-results"),
-  careerRecommendations: document.querySelector("#career-recommendations"),
 };
 
 let currentGoalRecord = null;
@@ -1117,9 +1114,7 @@ function renderWeeklyVersions(versions) {
 function startNewCareerSession() {
   currentCareerSessionId = null;
   renderCareerMessages([]);
-  renderCareerRecommendations([]);
   elements.careerMessage.value = "";
-  elements.careerAvailableMinutes.value = "";
   elements.careerMessage.focus();
 }
 
@@ -1139,7 +1134,6 @@ async function loadCareerSessions() {
       await loadCareerHistory(payload.sessions[0].id);
     } else if (!payload.sessions?.length) {
       renderCareerMessages([]);
-      renderCareerRecommendations([]);
     }
   } catch (error) {
     showAlert(errorMessage(error));
@@ -1155,10 +1149,6 @@ async function loadCareerHistory(sessionId) {
     currentCareerSessionId = payload.session?.id || sessionId;
     updateCareerSessionSelection();
     renderCareerMessages(payload.messages || []);
-    const latestAssistant = [...(payload.messages || [])]
-      .reverse()
-      .find((message) => message.role === "assistant");
-    renderCareerRecommendations(latestAssistant?.recommendations || []);
   } catch (error) {
     showAlert(errorMessage(error));
   }
@@ -1178,11 +1168,7 @@ async function handleCareerChatSubmit(event) {
     elements.careerMessage.focus();
     return;
   }
-  const availableMinutes = Number(elements.careerAvailableMinutes.value);
   const body = { message, session_id: currentCareerSessionId };
-  if (Number.isFinite(availableMinutes) && availableMinutes > 0) {
-    body.available_minutes = availableMinutes;
-  }
 
   setBusy(elements.careerSubmit, true);
   try {
@@ -1192,7 +1178,6 @@ async function handleCareerChatSubmit(event) {
     });
     currentCareerSessionId = payload.session_id;
     elements.careerMessage.value = "";
-    renderCareerRecommendations(payload.recommendations || []);
     if (payload.career_profile_update?.soul_sync_error) {
       showAlert(`画像已保存到数据库，但 SOUL.md 同步失败：${payload.career_profile_update.soul_sync_error}`);
     }
@@ -1227,7 +1212,11 @@ function renderCareerSessions(sessions) {
 function renderCareerMessages(messages) {
   elements.careerMessageList.replaceChildren();
   if (!messages.length) {
-    elements.careerMessageList.append(emptyBlock("可以直接描述你的技能、性格、发展意愿或当前困惑。"));
+    const emptyMessage = document.createElement("article");
+    emptyMessage.className = "career-message assistant";
+    emptyMessage.append(textBlock("strong", "DayPilot"));
+    emptyMessage.append(textBlock("p", "可以直接描述你的技能、性格、发展意愿或当前困惑。"));
+    elements.careerMessageList.append(emptyMessage);
     return;
   }
   messages.forEach((message) => {
@@ -1235,15 +1224,25 @@ function renderCareerMessages(messages) {
     item.className = `career-message ${message.role === "assistant" ? "assistant" : "user"}`;
     item.append(textBlock("strong", message.role === "assistant" ? "DayPilot" : "你"));
     item.append(textBlock("p", message.content || ""));
+    if (message.role === "assistant") {
+      const recommendationsBlock = careerRecommendationsBlock(message.recommendations || []);
+      if (recommendationsBlock) {
+        item.append(recommendationsBlock);
+      }
+    }
     elements.careerMessageList.append(item);
   });
   elements.careerMessageList.scrollTop = elements.careerMessageList.scrollHeight;
 }
 
-function renderCareerRecommendations(recommendations) {
-  elements.careerRecommendations.replaceChildren();
+function careerRecommendationsBlock(recommendations) {
   const normalized = Array.isArray(recommendations) ? recommendations : [];
-  elements.careerResults.hidden = !normalized.length;
+  if (!normalized.length) {
+    return null;
+  }
+  const section = document.createElement("section");
+  section.className = "career-recommendations";
+  section.append(textBlock("h4", "项目建议"));
   normalized.forEach((recommendation) => {
     const card = document.createElement("article");
     card.className = "career-recommendation-card";
@@ -1259,8 +1258,9 @@ function renderCareerRecommendations(recommendations) {
     card.append(careerMetaBlock("第一步", recommendation.first_step));
     card.append(careerMetaBlock("风险", recommendation.risks));
     card.append(careerMetaBlock("不建议现在做的理由", recommendation.not_now_reason));
-    elements.careerRecommendations.append(card);
+    section.append(card);
   });
+  return section;
 }
 
 function careerMetaBlock(label, value) {

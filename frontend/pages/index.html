@@ -198,28 +198,20 @@
             <section class="career-chat-panel" aria-label="职业规划聊天">
               <div class="career-message-list" id="career-message-list" aria-live="polite"></div>
 
-              <form class="work-form career-form" id="career-chat-form">
-                <label>
-                  <span>想讨论的职业问题</span>
+              <form class="career-form career-composer" id="career-chat-form">
+                <label class="career-composer-field">
+                  <span class="visually-hidden">想讨论的职业问题</span>
                   <textarea
                     id="career-chat-message"
                     name="message"
-                    rows="4"
-                    placeholder="例如：我会 Python 和一点机器学习，想往 AI Agent 方向发展，但精力有限，应该做什么项目？"
+                    rows="5"
+                    aria-label="想讨论的职业问题"
+                    placeholder="直接说你在想什么，例如：我会 Python 和一点机器学习，想往 AI Agent 方向发展，但精力有限，今天只有 45 分钟，应该做什么项目？"
                     required
                   ></textarea>
                 </label>
-                <label>
-                  <span>今天可投入分钟数（可空）</span>
-                  <input id="career-available-minutes" name="available_minutes" type="number" min="15" max="720" />
-                </label>
                 <button class="text-button" id="career-chat-submit" type="submit">发送</button>
               </form>
-
-              <section class="career-results" id="career-results" hidden>
-                <h3>项目建议</h3>
-                <div class="career-recommendations" id="career-recommendations"></div>
-              </section>
             </section>
           </div>
         </section>

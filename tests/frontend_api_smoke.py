@@ -220,6 +220,8 @@ def main() -> None:
                 assert marker in homepage, f"homepage missing {marker}"
             assert "model_name" not in homepage
             assert "llm_metadata" not in homepage
+            assert 'id="career-available-minutes"' not in homepage
+            assert "今天可投入分钟数" not in homepage
             frontend_js = _read_text(f"{frontend_base}/services/today-goal.js")
             for marker in [
                 "checkedInGoalIds",
@@ -227,10 +229,11 @@ def main() -> None:
                 "handleCareerChatSubmit",
                 "importSoulProjectsBeforeRefresh",
                 "/api/soul-sync/import-projects",
-                "elements.careerResults.hidden = !normalized.length",
+                "careerRecommendationsBlock",
                 "今天的项目都已 check-in",
             ]:
                 assert marker in frontend_js, f"frontend JS missing {marker}"
+            assert "available_minutes" not in frontend_js
             assert "/api/career-chat/profile-suggestion" not in frontend_js
             assert "career-profile-suggestions" not in homepage
 
