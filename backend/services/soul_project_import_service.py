@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.config.runtime_paths import default_backup_dir
+from backend.config.settings import DayPilotSettings, load_daypilot_settings
 from backend.repositories import daypilot_repository as repo
 from backend.repositories.database import DEFAULT_DB_PATH, initialize_database
 from backend.services.llm_client import generate_json_with_fallback
@@ -23,7 +24,7 @@ PROMPT_VERSION_DEEPSEEK = "soul_project_import_v2_deepseek"
 MOCK_MODEL_NAME = "mock-soul-project-parser"
 NEXT_SECTION_PATTERN = re.compile(r"^##\s+", flags=re.MULTILINE)
 LIST_ITEM_PATTERN = re.compile(r"^\s*(?:[-*+]|(?:\d+)[.)、])\s+(.+?)\s*$")
-STOP_LINES = ("本段落由 DayPilot 管理", "每日生成规则", "项目的当前进度")
+STOP_LINES = ("本段落由 DayPilot 管理", "本段落是项目变更", "每日生成规则", "项目的当前进度")
 EMPTY_PROJECT_MARKERS = ("暂无 active 项目", "暂无当前项目", "当前 active 项目有 0 个")
 PRIORITY_VALUES = {"P0", "P1", "P2"}
 ACTIVE_COUNT_PATTERN = re.compile(r"当前\s*active\s*项目(?:有|共|数量)?\s*[:：]?\s*\d+\s*个", flags=re.IGNORECASE)
@@ -56,14 +57,29 @@ def import_current_projects_from_soul(
     *,
     soul_path: str | Path = SOUL_PATH,
     today: date | None = None,
+    settings: DayPilotSettings | None = None,
 ) -> SoulProjectImportResult:
+    resolved_settings = settings or load_daypilot_settings()
     path = Path(soul_path)
     section_text = _extract_current_projects_section(path)
     project_parse_text = _project_parse_region(section_text)
-    entries = _parse_project_entries(project_parse_text)
+    parse_mode = "none"
+    entries: list[SoulProjectEntry] = []
     declares_no_active_projects = _section_declares_no_active_projects(section_text)
-    if not entries and not declares_no_active_projects:
-        entries = _parse_project_entries_with_llm(project_parse_text, soul_path=path)
+    if declares_no_active_projects:
+        parse_mode = "explicit_empty"
+    if not declares_no_active_projects and _should_use_llm_project_parser(resolved_settings):
+        entries = _parse_project_entries_with_llm(
+            project_parse_text,
+            soul_path=path,
+            settings=resolved_settings,
+        )
+        if entries:
+            parse_mode = "deepseek"
+    if not entries:
+        entries = _parse_project_entries(project_parse_text)
+        if entries:
+            parse_mode = "deterministic"
     section_hash = _hash_text(section_text)
     connection = initialize_database(db_path)
     try:
@@ -76,23 +92,8 @@ def import_current_projects_from_soul(
     previous_snapshot = previous_state.get("snapshot") if previous_state else {}
     if not isinstance(previous_snapshot, dict):
         previous_snapshot = {}
-    soul_patch = _merge_frontend_active_projects_into_soul(
-        path,
-        section_text=section_text,
-        entries=entries,
-        active_projects=active_projects,
-        previous_snapshot=previous_snapshot,
-    )
-    if soul_patch is not None:
-        section_text = _extract_current_projects_section(path)
-        project_parse_text = _project_parse_region(section_text)
-        entries = _parse_project_entries(project_parse_text)
-        declares_no_active_projects = _section_declares_no_active_projects(section_text)
-        if not entries and not declares_no_active_projects:
-            entries = _parse_project_entries_with_llm(project_parse_text, soul_path=path)
-        section_hash = _hash_text(section_text)
 
-    if not entries and not declares_no_active_projects and not active_projects:
+    if not entries and not declares_no_active_projects:
         raise SoulProjectImportError("SOUL.md 当前项目段落没有可识别的项目列表。")
 
     _ensure_unique_names(entries)
@@ -121,22 +122,18 @@ def import_current_projects_from_soul(
         ).payload
     else:
         lifecycle_payload = {
-            "status": "applied" if soul_patch else "no_change",
+            "status": "no_change",
             "action": "soul_project_import",
             "items": [],
             "applied_count": 0,
             "failed_count": 0,
             "today_goal_refresh_failed_count": 0,
-            "soul_synced": bool(soul_patch),
-            "soul_backup": soul_patch["backup_path"] if soul_patch else None,
+            "soul_synced": False,
+            "soul_backup": None,
             "soul_sync_queued": False,
             "soul_sync_retry_job_id": None,
             "soul_sync_error": None,
-            "message": (
-                "已把前端 active 项目补写入 SOUL.md。"
-                if soul_patch
-                else "SOUL.md 当前项目没有变化。"
-            ),
+            "message": "SOUL.md 当前项目没有变化。",
         }
     if declares_no_active_projects:
         _sync_no_active_project_preferences(db_path)
@@ -153,10 +150,11 @@ def import_current_projects_from_soul(
         "source": "SOUL.md",
         "target": "frontend",
         "direction": "soul_to_frontend",
+        "parse_mode": parse_mode,
         "section_hash": section_hash,
         "parsed_project_count": len(entries),
-        "soul_patched_count": soul_patch["count"] if soul_patch else 0,
-        "soul_patched_project_names": soul_patch["project_names"] if soul_patch else [],
+        "soul_patched_count": 0,
+        "soul_patched_project_names": [],
         "created_count": counts["create_project"],
         "updated_count": counts["update_project"],
         "renamed_count": counts["rename_project"],
@@ -165,7 +163,7 @@ def import_current_projects_from_soul(
         "items": lifecycle_payload.get("items") or [],
         "lifecycle": lifecycle_payload,
         "active_projects": final_snapshot["projects"],
-        "message": _result_message(counts, lifecycle_payload, soul_patch=soul_patch),
+        "message": _result_message(counts, lifecycle_payload),
     }
     return SoulProjectImportResult(payload)
 
@@ -260,7 +258,16 @@ def _looks_like_project_entry_line(text: str) -> bool:
     return False
 
 
-def _parse_project_entries_with_llm(section_text: str, *, soul_path: Path) -> list[SoulProjectEntry]:
+def _should_use_llm_project_parser(settings: DayPilotSettings) -> bool:
+    return settings.has_deepseek_key and settings.llm_mode in {"auto", "deepseek"}
+
+
+def _parse_project_entries_with_llm(
+    section_text: str,
+    *,
+    soul_path: Path,
+    settings: DayPilotSettings,
+) -> list[SoulProjectEntry]:
     try:
         llm_result = generate_json_with_fallback(
             task_name="soul_project_import_parse",
@@ -271,9 +278,12 @@ def _parse_project_entries_with_llm(section_text: str, *, soul_path: Path) -> li
             mock_generate=lambda: _mock_soul_project_parse(section_text),
             normalizer=_normalize_soul_project_parse_output,
             validator=_validate_soul_project_parse_output,
+            settings=settings,
             soul_path=soul_path,
         )
     except Exception:
+        return []
+    if llm_result.metadata.get("llm_mode_used") != "deepseek":
         return []
     return _entries_from_llm_output(llm_result.output)
 
@@ -285,7 +295,7 @@ def _soul_project_parse_messages(section_text: str) -> list[dict[str, str]]:
             "projects": [
                 {
                     "name": "project name",
-                    "priority": "P0|P1|P2|null",
+                    "priority": "P0|P1|P2|null; infer only from clear priority words, otherwise null",
                     "status_summary": "current progress/status, empty if unstated",
                     "target_goal": "project final goal, empty if unstated",
                     "today_goal": "project today goal, empty if unstated",
@@ -299,6 +309,8 @@ def _soul_project_parse_messages(section_text: str) -> list[dict[str, str]]:
             "Map 项目今日目标, 今日目标, 今天目标 to today_goal.",
             "For legacy 目标 without a clearer final/today label, put the same value in both target_goal and today_goal.",
             "Do not invent missing projects or goals.",
+            "Priority is optional and hidden from the user. If the section does not clearly say a project is main/high/medium/low priority, return null.",
+            "If the user says 主线, 最重要, 高优先, or 必须优先, use P0. If the user says 次要, 低优先, 维护, or 可选, use P2. Use P1 only for clear medium/secondary priority.",
         ],
         "section_text": section_text,
     }
@@ -435,7 +447,7 @@ def _entries_from_llm_output(output: dict[str, Any]) -> list[SoulProjectEntry]:
 
 
 def _parse_project_entry(raw_text: str, *, position: int) -> SoulProjectEntry | None:
-    priority = _extract_priority(raw_text)
+    priority = _extract_priority(raw_text) or _infer_priority_from_text(raw_text)
     text = _strip_priority(raw_text)
     text = re.sub(r"^(?:新增|添加|创建)\s*(?:P[012]\s*)?项目\s*[:：]?\s*", "", text, flags=re.IGNORECASE)
     name, details = _split_name_and_details(text)
@@ -535,6 +547,17 @@ def _extract_priority(text: str) -> str | None:
     if match is None:
         return None
     return _normalize_priority(match.group("priority"))
+
+
+def _infer_priority_from_text(text: str) -> str | None:
+    value = str(text or "")
+    if any(token in value for token in ("主线", "最重要", "最高优先", "高优先", "必须优先")):
+        return "P0"
+    if any(token in value for token in ("中优先", "中等优先", "次主线", "第二优先")):
+        return "P1"
+    if any(token in value for token in ("低优先", "次要", "维护", "可选")):
+        return "P2"
+    return None
 
 
 def _normalize_priority(value: Any) -> str | None:
@@ -726,12 +749,11 @@ def _active_project_count_line(total_count: int) -> str:
 
 
 def _render_frontend_project_line(index: int, project: dict[str, Any]) -> str:
-    priority = str(project.get("priority") or "P2").strip() or "P2"
     name = _soul_line_value(project.get("name"), limit=120)
     summary = _soul_line_value(project.get("status_summary"), limit=180)
     target = _soul_line_value(repo.project_target_goal(project), limit=160)
     today_goal = _soul_line_value(repo.project_today_goal(project), limit=160)
-    parts = [f"{priority} {name}"]
+    parts = [name]
     if summary:
         parts.append(f"当前进度：{summary}")
     if target:
@@ -1028,15 +1050,11 @@ def _import_status(lifecycle_payload: dict[str, Any]) -> str:
 def _result_message(
     counts: dict[str, int],
     lifecycle_payload: dict[str, Any],
-    *,
-    soul_patch: dict[str, Any] | None,
 ) -> str:
     if lifecycle_payload.get("status") == "failed":
         return lifecycle_payload.get("message") or "SOUL.md 项目同步失败。"
     changed = counts["create_project"] + counts["update_project"] + counts["rename_project"] + counts["complete_project"]
     if not changed:
-        if soul_patch:
-            return f"已把 {soul_patch['count']} 个前端 active 项目补写入 SOUL.md，SOUL 当前项目没有其它变化。"
         return "SOUL.md 当前项目没有变化。"
     message = (
         "SOUL.md 当前项目已同步："
@@ -1045,8 +1063,6 @@ def _result_message(
         f"改名 {counts['rename_project']}，"
         f"完成 {counts['complete_project']}。"
     )
-    if soul_patch:
-        return f"已先把 {soul_patch['count']} 个前端 active 项目补写入 SOUL.md；{message}"
     return message
 
 

@@ -32,9 +32,6 @@
             <span>职业规划</span>
           </button>
         </nav>
-        <button id="project-update-open" class="text-button secondary sidebar-action" type="button">
-          项目更新
-        </button>
         <div class="sidebar-note">
           <strong>日用节奏</strong>
           <span>小目标，留下可检查成果。</span>
@@ -217,45 +214,5 @@
         </section>
       </main>
     </div>
-
-    <section class="project-modal" id="project-modal" hidden aria-labelledby="project-modal-title">
-      <div class="project-dialog">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">Projects</p>
-            <h2 id="project-modal-title">项目更新</h2>
-          </div>
-          <button id="project-update-close" class="icon-button" type="button" aria-label="关闭项目更新">×</button>
-        </div>
-
-        <div class="project-columns">
-          <section>
-            <h3>当前项目</h3>
-            <div class="project-list" id="project-active-list"></div>
-          </section>
-          <section>
-            <h3>最近完成</h3>
-            <div class="project-list" id="project-completed-list"></div>
-          </section>
-        </div>
-
-        <form class="work-form project-form" id="project-lifecycle-form">
-          <label>
-            <span>自然语言更新</span>
-            <textarea
-              id="project-lifecycle-message"
-              name="message"
-              rows="5"
-              placeholder="例如：新增项目：微调一个编排规则的模型。当前进度：还没确定实现方案、数据集结构。项目最终目标：形成可复查的规则编排微调方案。项目今日目标：先确定方案和数据结构。"
-              required
-            ></textarea>
-          </label>
-          <p class="muted compact">也可以写：某个项目已经完成了，结果是……</p>
-          <button class="text-button" id="project-lifecycle-submit" type="submit">提交项目更新</button>
-        </form>
-
-        <p class="muted compact" id="project-lifecycle-result" aria-live="polite"></p>
-      </div>
-    </section>
   </body>
 </html>

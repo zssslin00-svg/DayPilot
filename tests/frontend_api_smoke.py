@@ -103,11 +103,34 @@ def _stop_server(server: Any, thread: threading.Thread) -> None:
 
 def _soul_file(root: Path) -> Path:
     path = root / "SOUL.md"
-    path.write_text(
-        "# DayPilot SOUL\n\n## 当前项目\n\n旧项目段落\n\n## 用户偏好\n\n- 小目标。\n",
-        encoding="utf-8",
+    _write_soul_current_projects(
+        path,
+        "1. DayPilot smoke acceptance：当前进度：准备 smoke 验收。项目今日目标：完成 DayPilot smoke 验收。",
     )
     return path
+
+
+def _write_soul_current_projects(path: Path, current_projects: str) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "# DayPilot SOUL",
+                "",
+                "## 当前项目",
+                "",
+                current_projects.strip(),
+                "",
+                "每日生成规则：",
+                "",
+                "- 每个 active 项目都生成一个今日目标。",
+                "",
+                "## 用户偏好",
+                "",
+                "- 小目标。",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
 
 def _seed_monday_to_thursday(db_path: Path) -> None:
@@ -162,6 +185,8 @@ def _seed_monday_to_thursday(db_path: Path) -> None:
                     blockers=[],
                     actual_outputs=[f"smoke/{item}"],
                     processor_snapshot={"source": "frontend-api-smoke"},
+                    created_at=f"{day_text} 00:00:00",
+                    updated_at=f"{day_text} 00:00:00",
                 )
             repo.create_ability_state(
                 connection,
@@ -204,10 +229,6 @@ def main() -> None:
                 'id="career-chat-form"',
                 'id="career-message-list"',
                 'id="app-alert"',
-                'id="project-update-open"',
-                'id="project-modal"',
-                'id="project-active-list"',
-                'id="project-lifecycle-form"',
                 'id="goal-card"',
                 'id="checkin-form"',
                 'id="goal-feedback-form"',
@@ -221,6 +242,10 @@ def main() -> None:
             assert "model_name" not in homepage
             assert "llm_metadata" not in homepage
             assert 'id="career-available-minutes"' not in homepage
+            assert 'id="project-update-open"' not in homepage
+            assert 'id="project-modal"' not in homepage
+            assert 'id="project-lifecycle-form"' not in homepage
+            assert "项目更新" not in homepage
             assert "今天可投入分钟数" not in homepage
             frontend_js = _read_text(f"{frontend_base}/services/today-goal.js")
             for marker in [
@@ -234,6 +259,7 @@ def main() -> None:
             ]:
                 assert marker in frontend_js, f"frontend JS missing {marker}"
             assert "available_minutes" not in frontend_js
+            assert "/api/projects/lifecycle" not in frontend_js
             assert "/api/career-chat/profile-suggestion" not in frontend_js
             assert "career-profile-suggestions" not in homepage
 
@@ -257,15 +283,19 @@ def main() -> None:
             assert len(career_history["messages"]) == 2
             assert career_history["pending_profile_update_suggestions"] == []
 
-            status, project_create = _post_json(
-                f"{backend_base}/api/projects/lifecycle",
-                {
-                    "message": "新增 P0 项目：微调一个编排规则的模型。当前进度：还没确定实现方案。项目最终目标：形成可复查的规则编排微调方案。项目今日目标：先确定方案。",
-                },
+            _write_soul_current_projects(
+                soul_path,
+                "\n".join(
+                    [
+                        "1. DayPilot smoke acceptance：当前进度：准备 smoke 验收。项目今日目标：完成 DayPilot smoke 验收。",
+                        "2. 微调一个编排规则的模型：当前进度：还没确定实现方案。项目最终目标：形成可复查的规则编排微调方案。项目今日目标：先确定方案。",
+                    ]
+                ),
             )
+            status, project_create = _post_json(f"{backend_base}/api/soul-sync/import-projects", {})
             assert status == 200
             assert project_create["status"] == "applied"
-            assert project_create["action"] == "create_project"
+            assert project_create["created_count"] >= 1
 
             status, projects_payload = _get_json(f"{backend_base}/api/projects")
             assert status == 200
@@ -288,7 +318,7 @@ def main() -> None:
                 },
             )
             assert status == 200
-            assert feedback_payload["updated_goal"]["active_version"]["version_no"] == 2
+            assert feedback_payload["updated_goal"]["active_version"]["version_no"] >= 2
             assert feedback_payload["updated_goal"]["goal_output"]["estimated_minutes"] <= 40
             assert feedback_payload["memory_update"]["status"] in {"applied", "skipped", "failed"}
 
@@ -384,18 +414,19 @@ def main() -> None:
             assert feedback_report["created"] is False
             assert len(feedback_report["weekly_report_versions"]) >= 3
 
-            status, project_complete = _post_json(
-                f"{backend_base}/api/projects/lifecycle",
-                {"message": "微调一个编排规则的模型已经完成了，结果是 smoke 已验证。"},
+            _write_soul_current_projects(
+                soul_path,
+                "1. DayPilot smoke acceptance：当前进度：smoke 已验证。项目今日目标：继续保持验收闭环。",
             )
+            status, project_complete = _post_json(f"{backend_base}/api/soul-sync/import-projects", {})
             assert status == 200
             assert project_complete["status"] == "applied"
-            assert project_complete["action"] == "complete_project"
+            assert project_complete["completed_count"] >= 1
         finally:
             _stop_server(backend_server, backend_thread)
             _stop_server(frontend_server, frontend_thread)
 
-    print("PASS: frontend/API smoke covers compact UI, project lifecycle, history edit, and weekly report revisions")
+    print("PASS: frontend/API smoke covers compact UI, SOUL project sync, history edit, and weekly report revisions")
 
 
 if __name__ == "__main__":

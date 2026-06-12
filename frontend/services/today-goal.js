@@ -11,15 +11,6 @@ const elements = {
   alert: document.querySelector("#app-alert"),
   alertMessage: document.querySelector("#app-alert-message"),
   alertClose: document.querySelector("#app-alert-close"),
-  projectOpen: document.querySelector("#project-update-open"),
-  projectModal: document.querySelector("#project-modal"),
-  projectClose: document.querySelector("#project-update-close"),
-  projectActiveList: document.querySelector("#project-active-list"),
-  projectCompletedList: document.querySelector("#project-completed-list"),
-  projectForm: document.querySelector("#project-lifecycle-form"),
-  projectMessage: document.querySelector("#project-lifecycle-message"),
-  projectSubmit: document.querySelector("#project-lifecycle-submit"),
-  projectResult: document.querySelector("#project-lifecycle-result"),
   todayRefresh: document.querySelector("#today-refresh"),
   historyRefresh: document.querySelector("#history-refresh"),
   todayEmpty: document.querySelector("#today-empty"),
@@ -82,14 +73,6 @@ function bindEvents() {
     tab.addEventListener("click", () => switchView(tab.dataset.view));
   });
   elements.alertClose.addEventListener("click", hideAlert);
-  elements.projectOpen.addEventListener("click", openProjectModal);
-  elements.projectClose.addEventListener("click", closeProjectModal);
-  elements.projectModal.addEventListener("click", (event) => {
-    if (event.target === elements.projectModal) {
-      closeProjectModal();
-    }
-  });
-  elements.projectForm.addEventListener("submit", handleProjectLifecycleSubmit);
   elements.todayRefresh.addEventListener("click", handleTodayRefresh);
   elements.historyRefresh.addEventListener("click", loadHistory);
   elements.feedbackForm.addEventListener("submit", handleGoalFeedbackSubmit);
@@ -110,9 +93,6 @@ async function handleTodayRefresh() {
   let soulImportPayload = null;
   try {
     soulImportPayload = await importSoulProjectsBeforeRefresh();
-    if (!elements.projectModal.hidden) {
-      await loadProjects();
-    }
     await regenerateTodayGoal();
     await loadHistory();
     showSoulProjectImportNotice(soulImportPayload);
@@ -240,84 +220,6 @@ function showSoulProjectImportNotice(payload) {
     Number(payload.completed_count || 0);
   if (changed > 0) {
     showAlert(payload.message || "SOUL.md 当前项目已同步。");
-  }
-}
-
-async function openProjectModal() {
-  hideAlert();
-  elements.projectModal.hidden = false;
-  elements.projectResult.textContent = "";
-  await loadProjects();
-  elements.projectMessage.focus();
-}
-
-function closeProjectModal() {
-  elements.projectModal.hidden = true;
-  elements.projectResult.textContent = "";
-}
-
-async function loadProjects() {
-  try {
-    const payload = await requestJson("/api/projects");
-    renderProjectLists(payload.active_projects || [], payload.completed_projects || []);
-  } catch (error) {
-    showAlert(errorMessage(error));
-  }
-}
-
-function renderProjectLists(activeProjects, completedProjects) {
-  renderProjectList(elements.projectActiveList, activeProjects, "暂无当前项目。");
-  renderProjectList(elements.projectCompletedList, completedProjects, "暂无完成项目。");
-}
-
-function renderProjectList(container, projects, emptyText) {
-  container.replaceChildren();
-  if (!projects.length) {
-    container.append(emptyBlock(emptyText));
-    return;
-  }
-  projects.forEach((project) => {
-    const item = document.createElement("article");
-    item.className = "project-item";
-    const head = document.createElement("div");
-    head.className = "history-head";
-    head.append(textBlock("strong", project.name || "-"));
-    head.append(textBlock("span", project.status || "active"));
-    const summary = document.createElement("p");
-    summary.className = "muted compact";
-    summary.textContent = project.status_summary || project.planning_bias || "暂无摘要。";
-    item.append(head, summary);
-    container.append(item);
-  });
-}
-
-async function handleProjectLifecycleSubmit(event) {
-  event.preventDefault();
-  const message = elements.projectMessage.value.trim();
-  if (!message) {
-    showAlert("项目更新内容不能为空。");
-    elements.projectMessage.focus();
-    return;
-  }
-
-  setBusy(elements.projectSubmit, true);
-  try {
-    const payload = await requestJson("/api/projects/lifecycle", {
-      method: "POST",
-      body: { message },
-    });
-    if (payload.status === "failed") {
-      showAlert(payload.reason || "项目更新失败。");
-      return;
-    }
-    elements.projectMessage.value = "";
-    elements.projectResult.textContent = payload.message || "项目信息已更新。";
-    await loadProjects();
-    await loadInitialData();
-  } catch (error) {
-    showAlert(errorMessage(error));
-  } finally {
-    setBusy(elements.projectSubmit, false);
   }
 }
 

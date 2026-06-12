@@ -992,7 +992,7 @@ def _sync_user_profile_projects(connection: sqlite3.Connection) -> None:
         repo.create_user_profile(
             connection,
             id=1,
-            long_term_direction="项目状态由 SOUL.md 和 DayPilot 项目更新共同管理。",
+            long_term_direction="项目状态由 SOUL.md 管理。",
             current_focus_projects=[project["name"] for project in active_projects],
             goal_preferences={
                 "project_priorities": project_priorities,
@@ -1047,7 +1047,7 @@ def _render_current_projects_section(active_projects: list[dict[str, Any]]) -> s
     lines.extend(
         [
             "",
-            "本段落由 DayPilot 管理，也可以手动编辑。使用单行清单维护 active 项目；DayPilot 会把前端仍 active 的项目补写到这里，以保留未完成承接状态。",
+            "本段落是项目变更的唯一入口。使用单行清单或自然语言维护 active 项目；从这里移除的 active 项目会在同步后标记为完成并保留历史。",
             "",
             "每日生成规则：",
             "",
@@ -1061,12 +1061,11 @@ def _render_current_projects_section(active_projects: list[dict[str, Any]]) -> s
 
 
 def _render_current_project_line(index: int, project: dict[str, Any]) -> str:
-    priority = str(project.get("priority") or "P2").strip() or "P2"
     name = _soul_line_value(project.get("name"), limit=120)
     summary = _soul_line_value(project.get("status_summary"), limit=180)
     target = _soul_line_value(repo.project_target_goal(project), limit=160)
     today_goal = _soul_line_value(repo.project_today_goal(project), limit=160)
-    parts = [f"{priority} {name}"]
+    parts = [name]
     if summary:
         parts.append(f"当前进度：{summary}")
     if target:

@@ -8,7 +8,7 @@
 
 <h1 align="center">DayPilot</h1>
 
-<p align="center">A local-first, privately controlled AI daily workbench that learns your habits over time: it adjusts goals from your profile, project progress, and daily feedback, then generates weekly reviews.</p>
+<p align="center">A private AI daily workbench driven by SOUL.md.</p>
 
 <p align="center">
   <a href="README.md">中文</a>
@@ -25,110 +25,43 @@
 
 ## What Is DayPilot
 
-DayPilot is a local-first, single-user, privately controlled AI daily workbench designed around roughly four effective work hours per day. It does not try to replace your big life planning. Instead, it compresses your long-term direction, current projects, preferences, and constraints into a goal you can deliver, check, and review today.
+DayPilot is a local-first, single-user AI daily workbench. It does not try to take over your life planning; it compresses your long-term direction, active projects, and real available energy into goals that can be delivered and reviewed today.
 
-It keeps learning from `SOUL.md`, the SQLite user profile, project history, feedback revisions, check-ins, and weekly-report preferences. The more you use it, the closer DayPilot can stay to your work rhythm, output preferences, energy boundaries, and career direction.
+Its project-change entry point is `SOUL.md`. Add, rename, update, remove, or complete projects by editing the `## Current Projects` section; the frontend reads state, refreshes goals, records feedback, handles check-ins, generates weekly reviews, and supports career-planning chat.
 
-Its core loop is short:
-
-1. On workdays, it reads your long-term context, current projects, and profile data, then generates today's goal.
-2. During the day, you can revise the goal with feedback, such as narrowing scope, changing the output format, or adjusting the time budget.
-3. In the evening, you submit a check-in with completion status, subjective difficulty, project progress, and tomorrow's direction.
-4. On Friday, it generates a weekly report and next-week focus from the week's records, then uses stable preferences to shape later output.
-
-The AI is not just a task generator. It helps organize project state, rewrite today's goal, adjust weekly-report focus, suggest profile updates, and support career-planning conversations. By default, data stays on your machine: the SQLite database, LLM logs, backups, and your real `SOUL.md` are not uploaded to external services, except for the DeepSeek API calls you configure.
+Real model mode only needs an API key in `.env` as `DEEPSEEK_API_KEY`. Do not put API keys in `SOUL.md`, the README, or any file that will be committed to git.
 
 ## Features
 
-**Local private workbench**: Keep the SQLite database, LLM logs, backups, and real `SOUL.md` on your machine by default, so personal projects, preferences, reviews, and career context can compound privately.
+**SOUL-driven projects** - `SOUL.md` is the only user-facing project-change entry point; Today imports the latest project state when it opens or refreshes.
 
-**A personal profile that gets smarter with use**: Detect habits and constraints from stable context, daily feedback, check-ins, weekly-report preferences, and career chat. New profile facts that the AI judges clear, stable, and worth keeping are written to SQLite and `SOUL.md` automatically.
+**Flexible project parsing** - Use one line per project or natural-language paragraphs; with a DeepSeek key, DayPilot tries LLM parsing first and falls back conservatively.
 
-**AI project and goal adjustment**: Generate small, deliverable goals for active projects with acceptance criteria, minimum output, time estimate, and difficulty. Changes to project names, summaries, planning guidance, targets, or priority can refresh the matching daily goal.
+**Today goals** - Generate small, clear goals for active projects with acceptance criteria, minimum output, time estimate, and explicit non-goals.
 
-**Feedback revision and long-term memory**: On the Today page, enter feedback like "I only have 45 minutes today", "this is too large", or "I want to write code", and DayPilot will generate a new goal version. Stable preferences, such as "do not give me pure learning goals" or "each goal must leave an inspectable output", become long-term memory.
+**Feedback revision** - Tell Today "I only have 45 minutes" or "this is too large", and DayPilot creates a new goal version.
 
-**Natural-language project updates**: Add projects, mark projects complete, and update project status in natural language, or edit the current-project section in `SOUL.md`. Opening or refreshing the Today page imports the latest project list, progress, and targets before goals are read or generated.
+**Check-in review** - Record completion, felt difficulty, and tomorrow's direction; project progress can be written back to `SOUL.md`.
 
-**AI weekly review**: End-of-day check-ins record completion text, completion status, felt difficulty, and tomorrow's direction. On Friday, DayPilot uses that evidence to generate a weekly report and next-week focus, then accepts feedback to create a new version.
+**Weekly review** - On Friday, DayPilot uses check-in evidence to produce a weekly report and next-week focus.
 
-**Career planning assistant**: In the **Career Planning** tab, talk to a private career-development planning assistant. It reads `SOUL.md`, the structured user profile, project history, ability state, and recent records to help decide what to do with spare time and how to build transferable skills and portfolio evidence.
+**Career planning chat** - Discuss spare time, skill growth, portfolio direction, and career constraints using `SOUL.md`, profile state, project history, and recent records.
 
-## How To Enter Personal Context
+**Local-first data** - SQLite, logs, backups, and your real `SOUL.md` stay on your machine by default; mock mode works without an API key.
 
-DayPilot needs to know who you are, what you are working on, and how you like to work. There are two kinds of input: stable context before startup, and daily context inside the web app. This context shapes later daily goals, project adjustments, weekly reviews, career-planning advice, and generated content style.
+**No P0 ceremony** - The UI, README, and SOUL template do not require P0/P1/P2 labels; old data remains compatible, and priority is only treated as an internal hint when you clearly express it.
 
-| Entry | Where to enter it | What to enter | How the system uses it |
-| --- | --- | --- | --- |
-| DeepSeek config | `.env` | `DEEPSEEK_API_KEY`, model, and timeout settings | The API key is required only when `DAYPILOT_LLM_MODE=deepseek`. The real LLM path uses it to generate goals, interpret feedback, organize project state, generate weekly reports, and answer career-planning chats. |
-| Stable personal profile | `SOUL.md`, copied from `SOUL.example.md` | Long-term direction, current skills, personality and work style, development intentions, career values and constraints, current project boundaries, user preferences, avoid rules, time budget, and goal-generation principles | Read on every agent call as long-term context, shaping goals, weekly reports, career advice, and later generated content. Good for stable information, not for temporary same-day details. |
-| Career planning chat | Left-side **Career Planning** in the web app | Spare time, career questions, desired direction, current skills, and personality notes | Gives direction analysis, clarifying questions, project suggestions, risks, and next actions. Clear and stable new profile facts are written to SQLite and `SOUL.md` automatically. |
-| Project changes | Left-side **Project Update**, or edit the current-project section in `SOUL.md` | "Add project: ... current progress: ... goal: ...", or maintain one-line entries like `P0 Project name: current progress: ... goal: ...` | Written to the SQLite project table and reflected in the current-project section of `SOUL.md`; opening or refreshing Today imports SOUL first, and active projects removed from that list are marked completed with history preserved. |
-| Today's preference or constraint | Today page **Feedback Revision** | "I only have 30 minutes today", "this goal is too large", "I want to do experiments", or "do not give abstract goals later" | First revises today's goal. If it is a stable preference or avoid pattern, it becomes long-term memory. |
-| End-of-day facts | Today page **Check-in** | Completion status, completion notes, felt difficulty, and tomorrow's direction | Used as history, project-progress evidence, weekly-report evidence, and the handoff into the next day's goal. |
-| Weekly report preference | Weekly page **Weekly Report Feedback** | "Make next week's plan more verifiable" or "do not write it like a diary log" | Generates a new weekly report version and saves stable weekly-report preferences. |
-
-Before the first run, copy `SOUL.example.md` to `SOUL.md`, then edit `SOUL.md`. At minimum, fill in these areas:
-
-```markdown
-## Long-Term Direction
-
-What capability I want to build over time, or what direction I want this project to serve.
-
-## Current Projects
-
-1. P0 Project name: current progress: current stage and recent blockers. goal: what I hope to advance today.
-
-## Current Skills
-
-- Python / frontend / backend / data analysis / LLM applications, with evidence.
-
-## Personality And Work Style
-
-- I work best with project-driven learning and plans that leave an output.
-
-## Development Intentions
-
-- Directions I want to deepen, fields I may move toward, and portfolio work I want to build.
-
-## Career Values And Constraints
-
-- I care about long-term compounding, real available time, energy boundaries, and visible deliverables.
-
-## User Preferences
-
-- I prefer small and deliverable goals.
-- I want goals to leave code, docs, experiment records, or decision notes.
-
-## Avoid
-
-- Do not compress long-term wishes into one-day tasks.
-- Do not give pure reading, watching, or thinking goals unless they leave an output.
-```
-
-Do not put API keys, account passwords, or private tokens in `SOUL.md` or the README. API keys belong only in `.env` or system environment variables.
-
-## Screenshots
-
-### Today Workbench
+## Screenshot
 
 <p align="center">
   <img src="docs/assets/daypilot-screenshot-today.png" alt="DayPilot Today workbench screenshot" width="860">
 </p>
 
-### History
-
-<p align="center">
-  <img src="docs/assets/daypilot-screenshot-history.png" alt="DayPilot History screenshot" width="860">
-</p>
-
 ## Quick Start
 
-"Starts on any computer" means a Windows, macOS, or Linux machine with Python 3.10+. Mock mode does not need a DeepSeek key; real DeepSeek mode needs access to the DeepSeek API and a valid `DEEPSEEK_API_KEY`. DayPilot currently does not require `npm install` or extra Python dependencies.
-
-> **Important: edit the `Current Projects` section in `SOUL.md` and the API key in `.env` before starting. The Today page imports SOUL automatically on first open; while the app is running, click Refresh after editing SOUL to sync immediately.**
-
 ### Windows
+
+Copy the config and personal-context template:
 
 ```bat
 cd /d D:\path\to\DayPilot
@@ -136,16 +69,27 @@ copy .env.example .env
 copy SOUL.example.md SOUL.md
 notepad .env
 notepad SOUL.md
-python scripts\start_daypilot.py
 ```
 
-If Windows says `python` is unavailable but Python Launcher is installed, replace the last line with `py -3 scripts\start_daypilot.py`. You can also run `scripts\start_daypilot.bat`; it will automatically try both entry points.
-
-For local mock debugging, you do not need a real DeepSeek key. During development, prefer `--restart`; it stops old DayPilot backend/frontend processes, backs up and restarts services, serves frontend files with no-cache headers, and opens a timestamped page:
+For local mock testing:
 
 ```bat
-cd /d D:\path\to\DayPilot
 set "DAYPILOT_LLM_MODE=mock" && python scripts\start_daypilot.py --restart
+```
+
+For real model mode, put this in `.env`:
+
+```text
+DAYPILOT_LLM_MODE=deepseek
+DEEPSEEK_API_KEY=your_deepseek_api_key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-pro
+```
+
+Then start DayPilot:
+
+```bat
+python scripts\start_daypilot.py --restart
 ```
 
 ### macOS / Linux
@@ -156,166 +100,74 @@ cp .env.example .env
 cp SOUL.example.md SOUL.md
 nano .env
 nano SOUL.md
-python3 scripts/start_daypilot.py
+DAYPILOT_LLM_MODE=mock python3 scripts/start_daypilot.py --restart
 ```
 
-`.env` needs at least:
+Startup opens the frontend by default; the backend runs at `http://127.0.0.1:8000`.
+
+## SOUL Format
+
+Use the `## Current Projects` section like this:
 
 ```text
-DAYPILOT_LLM_MODE=deepseek
-DEEPSEEK_API_KEY=your_deepseek_api_key
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-v4-pro
+1. DayPilot: current progress: polishing the SOUL sync loop. final goal: build a stable personal work-rhythm system. today's goal: verify that refreshing Today reads SOUL and creates an actionable goal.
+2. Training project: current progress: draft data plan exists. final goal: complete a real SFT + RL training record. today's goal: add one sample datum and one evaluation rule.
 ```
 
-The source-development startup script always uses the repo-local `.env`, `SOUL.md`, and `data/` paths. It checks `DEEPSEEK_API_KEY` in real LLM mode, backs up an existing database, initializes SQLite on first run, starts the backend at `http://127.0.0.1:8000`, starts the frontend at `http://127.0.0.1:5173/pages/index.html`, and opens the browser. With `--restart`, it first stops old DayPilot development or packaged processes on the default ports to avoid occupied ports, stale static assets, or duplicate services showing an outdated page.
+Natural-language paragraphs are also allowed. For example: "I am mainly advancing DayPilot and only want to verify SOUL sync today; the training project should just improve its data plan." With a real DeepSeek key, DayPilot tries to parse flexible text. Without a key, or when parsing is unreliable, it refuses destructive sync.
 
-Stop services:
-
-```bat
-python scripts\stop_daypilot.py
-```
-
-The stop script removes repo-local pid files and checks the default 8000/5173 ports for DayPilot processes.
-
-On macOS / Linux:
-
-```bash
-python3 scripts/stop_daypilot.py
-```
-
-Check the real model connection:
-
-```bat
-python scripts\check_deepseek_connection.py
-```
+When you remove an active project from `## Current Projects`, refreshing Today marks it completed while preserving history. If there are no active projects, write `No active projects.` or `暂无 active 项目。`.
 
 ## Architecture
 
 ```text
-backend/api/             HTTP API entry, based on the Python standard library
-backend/services/        Daily goal, feedback revision, project progress, weekly report, career chat, SOUL sync
-backend/repositories/    SQLite read/write wrappers
-backend/schemas/         Agent structured-output JSON Schema
-frontend/pages/          Single-page workbench HTML
-frontend/services/       Frontend API calls and page interactions
-frontend/styles/         Page styles
-prompts/                 Goal-generation prompts and examples
-evals/                   Agent behavior eval cases, rubrics, and scripts
-scripts/                 Start, stop, backup, restore, and connectivity checks
-data/                    Local database, backups, temporary files, and LLM logs
-docs/                    README image assets and public runbooks
+backend/      API, services, repositories, schemas
+frontend/     Today, History, Weekly, and Career Chat pages
+prompts/      Goal-generation prompts and examples
+evals/        Cases, rubrics, and evaluation scripts
+scripts/      Start, stop, backup, restore, and connectivity checks
+data/         Local database, backups, temporary files, and LLM logs
+docs/assets/  README image assets
 ```
 
-Core data flow:
-
-1. `SOUL.md`, the SQLite user profile, project list, and history records form the context.
-2. The service layer calls the DeepSeek OpenAI-compatible Chat Completions API and asks for JSON.
-3. JSON is written to SQLite after schema validation, normalization, and quality checks.
-4. The frontend reads the API and displays Today, History, Weekly, Project Update, and Career Chat.
-5. If `SOUL.md` sync fails, the failed task enters the SQLite retry queue and the background maintenance loop retries it.
-6. Career chat saves sessions and messages. Profile updates judged worth keeping are merged into `user_profile.career_profile` and synced to `SOUL.md` automatically, with applied audit records kept in SQLite.
+The data flow is short: `SOUL.md`, SQLite projects, and history records form the context; the service layer calls DeepSeek or deterministic mock adapters; validated results are written to SQLite and synced back to `SOUL.md` when needed; the frontend displays Today, History, Weekly, and Career Chat.
 
 ## Tech Stack
 
 | Layer | Technology |
 | --- | --- |
 | Frontend | HTML + CSS + Vanilla JavaScript |
-| Backend | Python 3.10+ standard library `ThreadingHTTPServer` |
+| Backend | Python 3.10+ standard-library HTTP service |
 | Agent runtime | DeepSeek OpenAI-compatible Chat Completions API |
-| Fallback | Deterministic mock adapters for tests and failure fallback |
-| Database | SQLite |
-| Local service | `scripts/serve_frontend.py` no-cache static frontend + Python backend |
-| Tests | Self-contained Python test scripts + eval cases/rubrics |
+| Local data | SQLite |
+| Fallback | Deterministic mock adapters |
+| Tests | Python test scripts + eval cases/rubrics |
 
 ## Platform Support
 
 | Platform | Status |
 | --- | --- |
-| Windows | Supported: `scripts\start_daypilot.py`, with `.bat` wrappers kept. |
-| macOS | Source-run support: use `python3 scripts/start_daypilot.py`. |
-| Linux | Source-run support: use `python3 scripts/start_daypilot.py`. |
-| Mobile browser | The pages have a responsive layout; the service still needs to run on a computer. |
+| Windows | Supported with `scripts\start_daypilot.py` |
+| macOS | Source-run support with `python3 scripts/start_daypilot.py` |
+| Linux | Source-run support with `python3 scripts/start_daypilot.py` |
+| Mobile browser | Pages are responsive; the service still needs to run on a computer |
 
-## Development And Verification
-
-Run all evals:
+## Development
 
 ```bat
+python scripts\check_deepseek_connection.py
 python -m evals.run_all
-```
-
-Run backend tests:
-
-```bat
-for %f in (backend\tests\test_*.py) do python %f
-```
-
-macOS / Linux:
-
-```bash
-for f in backend/tests/test_*.py; do python3 "$f"; done
-```
-
-Run frontend/API smoke:
-
-```bat
 python tests\frontend_api_smoke.py
+python scripts\stop_daypilot.py
 ```
 
-Restore the latest backup:
+## Data Sync
 
-```bat
-python scripts\restore_db.py
-```
-
-Windows can also use:
-
-```bat
-scripts\restore_latest_db.bat
-```
-
-## How Data Stays In Sync
-
-- You do not need to remember database fields. DayPilot keeps the latest project state organized, and the project summary, progress, and planning guidance shown in the app come from that state.
-- You can update projects in the web app, or edit the `Current Projects` section in `SOUL.md`. Opening or refreshing the Today page imports new projects and syncs renames, progress, targets, and priority changes; projects removed from the list are marked completed instead of deleted.
-- Check-in-derived project progress is written back to the current-project section in `SOUL.md`; if that write fails, the local retry queue will try again in the background.
-- When a project changes in a meaningful way, today's goal can refresh too, so DayPilot does not keep using an old project name or stale goal.
-- Every time today's goal is generated, regenerated, or revised with feedback, History shows the latest version. Older versions stay in the background for later review.
-- If you edit today's check-in, the new content replaces the old progress update, so outdated notes do not keep affecting the project.
-- Career planning chat saves the conversation and automatically keeps clear, stable, evidence-backed skills, preferences, constraints, or development directions.
-- Career-chat profile distillation only updates the personal profile and syncs `SOUL.md`; it does not create projects, refresh goals, or write check-ins.
-
-## API Surface
-
-- `GET /health`
-- `GET /api/today-goal`
-- `GET /api/history?days=30`
-- `GET /api/projects`
-- `POST /api/checkin`
-- `POST /api/today-goal/regenerate`
-- `POST /api/goal-feedback`
-- `POST /api/projects/lifecycle`
-- `POST /api/soul-sync/import-projects`
-- `POST /api/weekly-report/generate`
-- `POST /api/weekly-report/feedback`
-- `POST /api/career-chat`
-- `GET /api/career-chat/sessions`
-- `GET /api/career-chat/history?session_id=...`
-- `POST /api/career-chat/profile-suggestion` (legacy: only for old pending profile suggestions)
-- `GET /api/soul-sync/status`
-- `POST /api/soul-sync/retry`
-
-## Data Safety
-
-- DayPilot keeps personal databases, profiles, backups, and logs on your machine by default. In real LLM mode, it sends only the context needed for the current AI feature to your configured DeepSeek API endpoint.
-- `.env` is ignored by git and should contain only your local API key.
-- `data/db/`, `data/backups/`, `data/tmp/`, and `data/llm_logs/` are ignored by default.
-- LLM logs do not write API keys or Authorization headers.
-- The startup script backs up an existing SQLite database before starting services.
-- Career chat may send chat content to the configured DeepSeek endpoint; with `DAYPILOT_LLM_MODE=mock`, it uses the local deterministic fallback instead.
-- Career planning chat automatically saves profile facts that the AI judges clear and stable. Temporary moods, one-off constraints, and unsupported guesses should not be distilled.
-- Before uploading to GitHub, do not commit personal databases, LLM logs, or the private `SOUL.md`; the repository keeps only `SOUL.example.md`.
+- `GET /api/projects` remains as a read-only state source.
+- `POST /api/projects/lifecycle` is disabled for user writes and returns `410 project_lifecycle_disabled`.
+- Today refresh calls SOUL import and syncs the current-project section into SQLite.
+- Check-in project progress can be written back to `SOUL.md`, but removed active projects are not re-added.
+- Never commit your real `SOUL.md`, `.env`, databases, backups, or LLM logs.
 
 ## License
 
@@ -323,4 +175,6 @@ scripts\restore_latest_db.bat
 
 ## Links
 
+- [中文 README](README.md)
 - [SOUL.example.md](SOUL.example.md)
+- [Packaging](docs/packaging.md)

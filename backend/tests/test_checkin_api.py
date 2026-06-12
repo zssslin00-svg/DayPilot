@@ -73,7 +73,7 @@ def _valid_soul_file(path: Path) -> None:
                 "",
                 "## 当前项目",
                 "",
-                "旧项目段落",
+                "1. DayPilot 默认项目：当前进度：准备 check-in 测试。项目今日目标：保存一条 check-in。",
                 "",
                 "## 用户偏好",
                 "",
@@ -212,7 +212,8 @@ def test_checkin_project_progress_syncs_to_soul() -> None:
         assert progress["soul_sync_queued"] is False
         soul_text = soul_path.read_text(encoding="utf-8")
         assert "当前进度：" in soul_text
-        assert "目标：" in soul_text or "P2" in soul_text
+        assert "DayPilot 默认项目" in soul_text
+        assert "项目今日目标" in soul_text
 
 
 def test_checkin_updates_existing_submission() -> None:

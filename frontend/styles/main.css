@@ -744,66 +744,6 @@ button:focus-visible {
   font-weight: 800;
 }
 
-.project-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  display: grid;
-  place-items: center;
-  padding: 18px;
-  background: rgba(47, 49, 53, 0.28);
-}
-
-.project-dialog {
-  position: relative;
-  display: grid;
-  gap: 16px;
-  width: min(860px, 100%);
-  max-height: calc(100vh - 36px);
-  overflow: auto;
-  padding: 22px;
-  background:
-    radial-gradient(circle at 18% 20%, rgba(48, 52, 58, 0.045) 0 1px, transparent 1.5px),
-    var(--paper);
-}
-
-.project-columns {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.project-columns section,
-.project-list {
-  display: grid;
-  align-content: start;
-  gap: 10px;
-}
-
-.project-item {
-  display: grid;
-  align-self: start;
-  gap: 7px;
-  padding: 10px 12px;
-}
-
-.project-item .history-head {
-  justify-content: flex-start;
-  gap: 8px 10px;
-}
-
-.project-item .history-head strong {
-  flex: 0 1 auto;
-}
-
-.project-item .history-head span {
-  flex: 0 0 auto;
-}
-
-.project-form {
-  margin-top: 0;
-}
-
 .visually-hidden {
   position: absolute;
   width: 1px;

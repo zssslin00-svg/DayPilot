@@ -80,7 +80,7 @@ def _event_count(db_path: Path) -> int:
         connection.close()
 
 
-def test_soul_project_import_adds_updates_renames_and_preserves_frontend_active_projects() -> None:
+def test_soul_project_import_adds_updates_renames_and_completes_missing_active_projects() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         db_path = root / "soul-import.sqlite3"
@@ -153,9 +153,9 @@ def test_soul_project_import_adds_updates_renames_and_preserves_frontend_active_
         completed = import_current_projects_from_soul(db_path, soul_path=soul_path, today=WORKDAY).payload
         assert completed["status"] == "applied"
         assert completed["direction"] == "soul_to_frontend"
-        assert completed["soul_patched_count"] == 1
+        assert completed["soul_patched_count"] == 0
         assert completed["updated_count"] == 1
-        assert completed["completed_count"] == 0
+        assert completed["completed_count"] == 1
 
         connection = initialize_database(db_path)
         try:
@@ -166,10 +166,10 @@ def test_soul_project_import_adds_updates_renames_and_preserves_frontend_active_
         finally:
             connection.close()
         assert alpha_after["status_summary"] == "SOUL 继续推进"
-        assert beta_after["status"] == "active"
-        assert active_names == ["Alpha 改名后项目", "Beta 项目"]
-        assert profile["current_focus_projects"] == ["Alpha 改名后项目", "Beta 项目"]
-        assert "Beta 项目" in soul_path.read_text(encoding="utf-8")
+        assert beta_after["status"] == "completed"
+        assert active_names == ["Alpha 改名后项目"]
+        assert profile["current_focus_projects"] == ["Alpha 改名后项目"]
+        assert "Beta 项目" not in _current_project_section(soul_path)
 
 
 def test_soul_project_import_no_active_projects_clears_profile_projects() -> None:
@@ -184,8 +184,8 @@ def test_soul_project_import_no_active_projects_clears_profile_projects() -> Non
 
         assert result["status"] == "applied"
         assert result["direction"] == "soul_to_frontend"
-        assert result["soul_patched_count"] == 1
-        assert result["completed_count"] == 0
+        assert result["soul_patched_count"] == 0
+        assert result["completed_count"] == 1
 
         connection = initialize_database(db_path)
         try:
@@ -195,10 +195,10 @@ def test_soul_project_import_no_active_projects_clears_profile_projects() -> Non
         finally:
             connection.close()
 
-        assert [project["name"] for project in active_projects] == ["Alpha 项目"]
-        assert alpha["status"] == "active"
-        assert profile["current_focus_projects"] == ["Alpha 项目"]
-        assert "Alpha 项目" in soul_path.read_text(encoding="utf-8")
+        assert active_projects == []
+        assert alpha["status"] == "completed"
+        assert profile["current_focus_projects"] == []
+        assert "Alpha 项目" not in _current_project_section(soul_path)
 
 
 def test_soul_project_import_legacy_goal_backfills_final_and_today_goal() -> None:
@@ -249,19 +249,20 @@ def test_soul_project_import_accepts_non_list_priority_lines() -> None:
         assert "跑通非列表导入" in repo.project_today_goal(project)
 
 
-def test_soul_project_import_llm_fallback_parses_prose_section() -> None:
+def test_soul_project_import_accepts_list_items_without_priority() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
-        db_path = root / "soul-import-prose.sqlite3"
+        db_path = root / "soul-import-no-priority.sqlite3"
         soul_path = root / "SOUL.md"
 
         _write_soul(
             soul_path,
-            "我现在主要推进 Gamma 项目，当前进度是刚完成调研，最终目标是形成可复用导入器，今日目标是整理解析样例。",
+            "1. Gamma 项目：当前进度：刚完成调研。最终目标：形成可复用导入器。今日目标：整理解析样例。",
         )
         result = import_current_projects_from_soul(db_path, soul_path=soul_path, today=WORKDAY).payload
 
         assert result["status"] == "applied"
+        assert result["parse_mode"] == "deterministic"
         connection = initialize_database(db_path)
         try:
             project = repo.get_project_by_name(connection, "Gamma 项目")
@@ -273,13 +274,45 @@ def test_soul_project_import_llm_fallback_parses_prose_section() -> None:
         assert "整理解析样例" in repo.project_today_goal(project)
 
 
+def test_soul_project_import_rejects_free_prose_without_api_parser() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        db_path = root / "soul-import-prose.sqlite3"
+        soul_path = root / "SOUL.md"
+
+        _write_soul(
+            soul_path,
+            "我现在主要推进 Gamma 项目，当前进度是刚完成调研，最终目标是形成可复用导入器，今日目标是整理解析样例。",
+        )
+        try:
+            import_current_projects_from_soul(db_path, soul_path=soul_path, today=WORKDAY)
+        except Exception as exc:  # noqa: BLE001
+            assert "没有可识别的项目列表" in str(exc)
+        else:
+            raise AssertionError("free prose import should require the real API parser")
+
+        connection = initialize_database(db_path)
+        try:
+            assert repo.list_projects(connection) == []
+        finally:
+            connection.close()
+
+
+def _current_project_section(path: Path) -> str:
+    text = path.read_text(encoding="utf-8")
+    start = text.find("## 当前项目")
+    end = text.find("## 用户偏好")
+    return text[start:end] if start >= 0 and end > start else ""
+
+
 def main() -> None:
-    test_soul_project_import_adds_updates_renames_and_preserves_frontend_active_projects()
+    test_soul_project_import_adds_updates_renames_and_completes_missing_active_projects()
     test_soul_project_import_no_active_projects_clears_profile_projects()
     test_soul_project_import_legacy_goal_backfills_final_and_today_goal()
     test_soul_project_import_accepts_non_list_priority_lines()
-    test_soul_project_import_llm_fallback_parses_prose_section()
-    print("PASS: SOUL.md current project import adds, updates, renames, and preserves frontend active projects")
+    test_soul_project_import_accepts_list_items_without_priority()
+    test_soul_project_import_rejects_free_prose_without_api_parser()
+    print("PASS: SOUL.md current project import adds, updates, renames, and treats SOUL as authority")
 
 
 if __name__ == "__main__":

@@ -38,8 +38,6 @@ from backend.services.history_service import (  # noqa: E402
     get_history,
 )
 from backend.services.project_lifecycle_service import (  # noqa: E402
-    ProjectLifecycleValidationError,
-    apply_project_lifecycle_message,
     get_project_overview,
 )
 from backend.services.runtime_maintenance_service import start_background_maintenance  # noqa: E402
@@ -534,24 +532,13 @@ class DayPilotHandler(BaseHTTPRequestHandler):
         self._send_json(200, result.payload)
 
     def _handle_project_lifecycle(self) -> None:
-        try:
-            payload = self._read_json_body()
-        except ValueError as exc:
-            self._send_json(400, {"error": "invalid_json", "detail": str(exc)})
-            return
-
-        try:
-            result = apply_project_lifecycle_message(
-                self.server.db_path,
-                payload,
-                soul_path=self.server.soul_path,
-                today=self.server.today_provider(),
-            )
-        except ProjectLifecycleValidationError as exc:
-            self._send_json(400, {"error": "invalid_project_lifecycle", "detail": str(exc)})
-            return
-
-        self._send_json(200, result.payload)
+        self._send_json(
+            410,
+            {
+                "error": "project_lifecycle_disabled",
+                "detail": "项目变更入口已收敛到 SOUL.md。请编辑 SOUL.md 的当前项目段后刷新 Today。",
+            },
+        )
 
     def _read_json_body(self) -> dict[str, Any]:
         raw_length = self.headers.get("Content-Length", "0")

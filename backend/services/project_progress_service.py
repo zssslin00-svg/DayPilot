@@ -119,6 +119,7 @@ def update_project_progress_for_checkin(
     soul_path: str | Path = SOUL_PATH,
 ) -> ProjectProgressUpdateResult:
     try:
+        _import_latest_soul_projects_before_progress_update(db_path, soul_path)
         context = _build_progress_context(db_path, checkin_id)
         projects = context["projects"]
         if not projects:
@@ -174,6 +175,29 @@ def update_project_progress_for_checkin(
                 "reason": _safe_error(exc),
             }
         )
+
+
+def _import_latest_soul_projects_before_progress_update(
+    db_path: str | Path,
+    soul_path: str | Path,
+) -> None:
+    from backend.services.soul_project_import_service import (
+        SoulProjectImportError,
+        import_current_projects_from_soul,
+    )
+
+    connection = initialize_database(db_path)
+    try:
+        with connection:
+            ensure_projects_seeded(connection)
+    finally:
+        connection.close()
+    try:
+        import_current_projects_from_soul(db_path, soul_path=soul_path)
+    except SoulProjectImportError as exc:
+        reason = str(exc)
+        if "没有可识别的项目列表" in reason:
+            raise
 
 
 class MockProjectProgressLLMAdapter:

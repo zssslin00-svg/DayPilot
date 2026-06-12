@@ -6,6 +6,7 @@ import socket
 import sys
 import tempfile
 import threading
+import urllib.error
 import urllib.request
 from datetime import date
 from pathlib import Path
@@ -55,7 +56,10 @@ def _request(
             headers={"Content-Type": "application/json"},
             method=method,
         )
-        with opener.open(request, timeout=5) as response:
+        try:
+            with opener.open(request, timeout=5) as response:
+                return int(response.status), json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as response:
             return int(response.status), json.loads(response.read().decode("utf-8"))
     finally:
         server.shutdown()
@@ -98,7 +102,7 @@ def _seed(db_path: Path) -> None:
         connection.close()
 
 
-def test_project_lifecycle_api_lists_creates_and_completes_projects() -> None:
+def test_project_lifecycle_api_is_read_only_and_rejects_user_writes() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         db_path = root / "api-lifecycle.sqlite3"
@@ -109,7 +113,7 @@ def test_project_lifecycle_api_lists_creates_and_completes_projects() -> None:
         assert status == 200
         assert overview["active_projects"][0]["name"] == "DayPilot 日用验证"
 
-        status, created = _request(
+        status, disabled = _request(
             db_path,
             soul_path,
             "POST",
@@ -118,70 +122,22 @@ def test_project_lifecycle_api_lists_creates_and_completes_projects() -> None:
                 "message": "新增 P0 项目：微调一个编排规则的模型。当前进度：还没确定实现方案。项目最终目标：形成可复查的规则编排微调方案。项目今日目标：先确定方案。",
             },
         )
-        assert status == 200
-        assert created["status"] == "applied"
-        assert created["action"] == "create_project"
-        assert created["items"][0]["today_goal_policy"] == "create"
-        assert created["items"][0]["today_goal_refresh"] == "created"
-
-        status, renamed = _request(
-            db_path,
-            soul_path,
-            "POST",
-            "/api/projects/lifecycle",
-            {
-                "message": "把这个项目微调一个编排规则的模型改成下面这个项目：实现基于规则库的规则编排模块；当前进度是正在确认实现方案",
-            },
-        )
-        assert status == 200
-        assert renamed["status"] == "applied"
-        assert renamed["action"] == "update_project"
-        assert renamed["items"][0]["today_goal_policy"] == "refresh"
-        assert renamed["items"][0]["today_goal_refresh"] == "refreshed"
-        assert renamed["project"]["name"] == "实现基于规则库的规则编排模块"
-        assert renamed["project"]["status_summary"] == "正在确认实现方案"
-
-        status, completed = _request(
-            db_path,
-            soul_path,
-            "POST",
-            "/api/projects/lifecycle",
-            {"message": "DayPilot 日用验证已经完成了，结果是可以进入一周试用。"},
-        )
-        assert status == 200
-        assert completed["status"] == "applied"
-        assert completed["action"] == "complete_project"
-        assert completed["items"][0]["today_goal_policy"] == "remove"
-        assert completed["items"][0]["today_goal_refresh"] == "removed"
-
-        status, deleted = _request(
-            db_path,
-            soul_path,
-            "POST",
-            "/api/projects/lifecycle",
-            {"message": "删除项目：实现基于规则库的规则编排模块"},
-        )
-        assert status == 200
-        assert deleted["status"] == "applied"
-        assert deleted["action"] == "delete_project"
-        assert deleted["items"][0]["today_goal_policy"] == "remove"
-        assert deleted["items"][0]["today_goal_refresh"] == "removed"
+        assert status == 410
+        assert disabled["error"] == "project_lifecycle_disabled"
 
         status, overview = _request(db_path, soul_path, "GET", "/api/projects")
         active_names = [project["name"] for project in overview["active_projects"]]
         completed_names = [project["name"] for project in overview["completed_projects"]]
-        assert "实现基于规则库的规则编排模块" not in active_names
         assert "微调一个编排规则的模型" not in active_names
-        assert "DayPilot 日用验证" not in active_names
-        assert "DayPilot 日用验证" in completed_names
+        assert "DayPilot 日用验证" in active_names
+        assert "DayPilot 日用验证" not in completed_names
         soul_text = soul_path.read_text(encoding="utf-8")
-        assert "实现基于规则库的规则编排模块" not in soul_text
-        assert "DayPilot 日用验证" not in soul_text
+        assert "微调一个编排规则的模型" not in soul_text
 
 
 def main() -> None:
-    test_project_lifecycle_api_lists_creates_and_completes_projects()
-    print("PASS: project lifecycle API lists, creates, completes, and syncs SOUL")
+    test_project_lifecycle_api_is_read_only_and_rejects_user_writes()
+    print("PASS: project lifecycle API lists projects and rejects user writes")
 
 
 if __name__ == "__main__":
