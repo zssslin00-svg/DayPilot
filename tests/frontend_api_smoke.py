@@ -278,6 +278,11 @@ def main() -> None:
                 "careerAssistantContent",
                 "cleanCareerMessageText",
                 "replaceCareerMessage",
+                "careerProjectBindingBlock",
+                "project_binding",
+                "careerRecommendationActionBlock",
+                "/api/career-chat/recommendation-adoption",
+                "project-goal-group",
             ]:
                 assert marker in frontend_js, f"frontend JS missing {marker}"
             assert "soulImportPayload" not in frontend_js
@@ -294,6 +299,7 @@ def main() -> None:
                 ".career-user-text",
                 ".career-composer-title",
                 ".career-composer-hint",
+                ".career-project-binding",
             ]:
                 assert marker in frontend_css, f"frontend CSS missing {marker}"
 

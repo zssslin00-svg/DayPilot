@@ -43,7 +43,11 @@ def main() -> None:
                 'soul_sync_retry_jobs',
                 'ability_state',
                 'weekly_reports',
-                'weekly_focus'
+                'weekly_focus',
+                'career_chat_sessions',
+                'career_chat_messages',
+                'career_profile_update_suggestions',
+                'career_recommendation_actions'
               )
             """
         ).fetchone()[0]
@@ -51,7 +55,7 @@ def main() -> None:
         connection.close()
 
     print(f"Initialized DayPilot database at {db_path}")
-    print(f"Core tables present: {table_count}/12")
+    print(f"Core tables present: {table_count}/16")
 
 
 if __name__ == "__main__":

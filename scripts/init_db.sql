@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS daily_goals (
   is_workday INTEGER NOT NULL CHECK (is_workday IN (0, 1)),
   status TEXT NOT NULL DEFAULT 'active'
     CHECK (status IN ('active', 'checked_in', 'skipped', 'archived')),
+  goal_source TEXT NOT NULL DEFAULT 'daily_planning'
+    CHECK (goal_source IN ('daily_planning', 'career_recommendation')),
+  source_payload TEXT NOT NULL DEFAULT '{}',
+  display_order INTEGER NOT NULL DEFAULT 0 CHECK (display_order >= 0),
   active_version_id INTEGER,
   context_snapshot TEXT NOT NULL DEFAULT '{}',
   revision_count INTEGER NOT NULL DEFAULT 0 CHECK (revision_count >= 0),
@@ -49,8 +53,7 @@ CREATE TABLE IF NOT EXISTS daily_goals (
   FOREIGN KEY (profile_id) REFERENCES user_profile(id),
   FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
   FOREIGN KEY (active_version_id) REFERENCES goal_versions(id)
-    ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED,
-  UNIQUE (goal_date, project_id)
+    ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE IF NOT EXISTS goal_versions (
@@ -403,9 +406,33 @@ CREATE TABLE IF NOT EXISTS career_profile_update_suggestions (
   FOREIGN KEY (message_id) REFERENCES career_chat_messages(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS career_recommendation_actions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL,
+  message_id INTEGER NOT NULL,
+  recommendation_index INTEGER NOT NULL CHECK (recommendation_index >= 0),
+  status TEXT NOT NULL
+    CHECK (status IN ('applied', 'pending_next_workday')),
+  action TEXT NOT NULL
+    CHECK (action IN ('existing_project_goal', 'new_project_goal', 'restored_project_goal')),
+  project_id INTEGER NOT NULL,
+  daily_goal_id INTEGER,
+  recommendation_snapshot TEXT NOT NULL DEFAULT '{}',
+  source_payload TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (session_id) REFERENCES career_chat_sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY (message_id) REFERENCES career_chat_messages(id) ON DELETE CASCADE,
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+  FOREIGN KEY (daily_goal_id) REFERENCES daily_goals(id) ON DELETE SET NULL,
+  UNIQUE (message_id, recommendation_index)
+);
+
 CREATE INDEX IF NOT EXISTS idx_career_chat_sessions_updated
   ON career_chat_sessions(status, updated_at, id);
 CREATE INDEX IF NOT EXISTS idx_career_chat_messages_session
   ON career_chat_messages(session_id, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_career_profile_suggestions_status
   ON career_profile_update_suggestions(status, session_id, id);
+CREATE INDEX IF NOT EXISTS idx_career_recommendation_actions_message
+  ON career_recommendation_actions(message_id, recommendation_index);

@@ -111,6 +111,7 @@ def test_career_chat_saves_chat_and_auto_applies_suggestions_without_touching_go
         assert isinstance(result["recommendations"], list)
         if result["recommendations"]:
             assert any("Agent" in item["title"] or "Agent" in item["why_it_fits"] for item in result["recommendations"])
+            assert all("project_binding" in item for item in result["recommendations"])
         assert result["profile_update_suggestions"]
         assert {item["status"] for item in result["profile_update_suggestions"]} == {"applied"}
         assert result["career_profile_update"]["status"] == "applied"
@@ -197,6 +198,11 @@ def test_career_chat_normalizer_preserves_multiline_summary_and_structured_cards
                 "estimated_time": "45 分钟完成第一版记录",
                 "deliverable": "一份包含输入、输出和观察结果的实验记录",
                 "first_step": "先写 3 条规则和 3 个查询样例。",
+                "project_binding": {
+                    "kind": "existing_project",
+                    "project_name": "Agent evaluation",
+                    "reason": "承接当前 Agent evaluation 项目。",
+                },
                 "risks": "容易扩成完整系统，需要只保留最小验证。",
                 "not_now_reason": "如果今天精力不足，先记录候选，不做工程化。",
             }
@@ -211,6 +217,93 @@ def test_career_chat_normalizer_preserves_multiline_summary_and_structured_cards
     assert "Mini Agent 记忆实验" not in normalized["assistant_message"]
     assert normalized["recommendations"][0]["title"] == "Mini Agent 记忆实验"
     assert normalized["recommendations"][0]["deliverable"]
+    assert normalized["recommendations"][0]["project_binding"]["project_name"] == "Agent evaluation"
+
+
+def test_career_chat_project_binding_requires_exact_active_project_name() -> None:
+    output = {
+        "schema_version": "career_chat_response.v1",
+        "assistant_message": "今天更适合把已有项目切出一个可验证实验。",
+        "recommendations": [
+            {
+                "title": "奖励机制对比实验",
+                "why_it_fits": "它能把当前项目推进成可复查实验。",
+                "skills_to_build": ["实验设计"],
+                "estimated_time": "60 分钟",
+                "deliverable": "一份实验记录",
+                "first_step": "先列出两个对比条件。",
+                "project_binding": {
+                    "kind": "existing_project",
+                    "project_name": "Agent evaluation",
+                    "reason": "精确命中 active 项目。",
+                },
+                "risks": "范围可能扩大。",
+                "not_now_reason": "时间不足时先记录候选。",
+            }
+        ],
+        "profile_update_suggestions": [],
+    }
+
+    normalized = career_chat_module.normalize_career_chat_response(output)
+    career_chat_module.validate_career_chat_response(normalized, active_project_names=["Agent evaluation"])
+
+    normalized["recommendations"][0]["project_binding"]["project_name"] = "Agent eval"
+    try:
+        career_chat_module.validate_career_chat_response(normalized, active_project_names=["Agent evaluation"])
+    except ValueError as exc:
+        assert "unknown_existing_project" in str(exc)
+    else:
+        raise AssertionError("existing_project binding must exactly match an active project name")
+
+
+def test_career_chat_new_project_binding_cannot_collide_with_active_project() -> None:
+    output = {
+        "schema_version": "career_chat_response.v1",
+        "assistant_message": "如果是新方向，项目名需要和 active 项目区分开。",
+        "recommendations": [
+            {
+                "title": "作品证据页",
+                "why_it_fits": "它适合作为独立成长证据。",
+                "skills_to_build": ["作品化表达"],
+                "estimated_time": "90 分钟",
+                "deliverable": "一页作品证据",
+                "first_step": "先定义页面结构。",
+                "project_binding": {
+                    "kind": "new_project",
+                    "project_name": "Agent evaluation",
+                    "reason": "错误地撞上 active 项目。",
+                },
+                "risks": "会和已有项目混淆。",
+                "not_now_reason": "可以先记为候选。",
+            }
+        ],
+        "profile_update_suggestions": [],
+    }
+
+    normalized = career_chat_module.normalize_career_chat_response(output)
+    try:
+        career_chat_module.validate_career_chat_response(normalized, active_project_names=["Agent evaluation"])
+    except ValueError as exc:
+        assert "new_project_collides" in str(exc)
+    else:
+        raise AssertionError("new_project binding must not reuse an active project name")
+
+
+def test_career_chat_rejects_card_promise_without_structured_cards() -> None:
+    output = {
+        "schema_version": "career_chat_response.v1",
+        "assistant_message": "下面给出两个可立即启动的最小项目卡片，你可以择一加入 active。",
+        "recommendations": [],
+        "profile_update_suggestions": [],
+    }
+
+    normalized = career_chat_module.normalize_career_chat_response(output)
+    try:
+        career_chat_module.validate_career_chat_response(normalized)
+    except ValueError as exc:
+        assert "promised_cards" in str(exc)
+    else:
+        raise AssertionError("card promise without recommendations should fail validation")
 
 
 def test_legacy_profile_suggestion_apply_updates_structured_profile_and_soul() -> None:
@@ -353,6 +446,9 @@ def main() -> None:
     test_career_chat_saves_chat_and_auto_applies_suggestions_without_touching_goal_loop()
     test_career_chat_allows_assistant_text_without_recommendation_cards()
     test_career_chat_normalizer_preserves_multiline_summary_and_structured_cards()
+    test_career_chat_project_binding_requires_exact_active_project_name()
+    test_career_chat_new_project_binding_cannot_collide_with_active_project()
+    test_career_chat_rejects_card_promise_without_structured_cards()
     test_legacy_profile_suggestion_apply_updates_structured_profile_and_soul()
     test_legacy_profile_suggestion_dismiss_does_not_update_profile()
     test_career_chat_with_missing_soul_and_empty_profile_still_gives_conservative_advice()

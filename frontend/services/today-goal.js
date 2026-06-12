@@ -313,10 +313,38 @@ function renderVisibleTodayGoalCards(fallbackDate = currentApiDate) {
     legacyTaskGrid.hidden = true;
   }
   elements.goalContent.className = "project-goal-list";
-  visibleGoalRecords.forEach((goalRecord) => {
-    elements.goalContent.append(projectGoalCard(goalRecord, fallbackDate));
+  groupGoalRecordsByProject(visibleGoalRecords).forEach((group) => {
+    const groupSection = document.createElement("section");
+    groupSection.className = "project-goal-group";
+    const heading = document.createElement("div");
+    heading.className = "project-goal-group-heading";
+    heading.append(textBlock("strong", group.projectName));
+    heading.append(textBlock("span", `${group.records.length} 个今日目标`));
+    groupSection.append(heading);
+    group.records.forEach((goalRecord) => {
+      groupSection.append(projectGoalCard(goalRecord, fallbackDate));
+    });
+    elements.goalContent.append(groupSection);
   });
   return visibleGoalRecords;
+}
+
+function groupGoalRecordsByProject(records) {
+  const groups = [];
+  const indexByKey = new Map();
+  records.forEach((record) => {
+    const project = record?.project || {};
+    const key = String(project.id || record?.daily_goal?.project_id || "unknown");
+    if (!indexByKey.has(key)) {
+      indexByKey.set(key, groups.length);
+      groups.push({
+        projectName: project.name || `项目 ${record?.daily_goal?.project_id || "-"}`,
+        records: [],
+      });
+    }
+    groups[indexByKey.get(key)].records.push(record);
+  });
+  return groups;
 }
 
 function renderGoalEmpty(message) {
@@ -1238,6 +1266,7 @@ function careerMessageFromPayload(payload) {
     };
   }
   return {
+    id: assistant.id,
     role: "assistant",
     content: assistant.content || assistant.assistant_message || "",
     recommendations: assistant.recommendations || payload.recommendations || [],
@@ -1263,7 +1292,7 @@ function careerMessageElement(message, options = {}) {
 
   if (role === "assistant") {
     item.append(careerAssistantContent(message.content || ""));
-    const recommendationsBlock = careerRecommendationsBlock(message.recommendations || []);
+    const recommendationsBlock = careerRecommendationsBlock(message.recommendations || [], message);
     if (recommendationsBlock) {
       item.append(recommendationsBlock);
     }
@@ -1343,7 +1372,7 @@ function scrollCareerMessagesToBottom() {
   elements.careerMessageList.scrollTop = elements.careerMessageList.scrollHeight;
 }
 
-function careerRecommendationsBlock(recommendations) {
+function careerRecommendationsBlock(recommendations, message) {
   const normalized = Array.isArray(recommendations) ? recommendations : [];
   if (!normalized.length) {
     return null;
@@ -1351,10 +1380,14 @@ function careerRecommendationsBlock(recommendations) {
   const section = document.createElement("section");
   section.className = "career-recommendations";
   section.append(textBlock("h4", "项目建议"));
-  normalized.forEach((recommendation) => {
+  normalized.forEach((recommendation, index) => {
     const card = document.createElement("article");
     card.className = "career-recommendation-card";
     card.append(textBlock("h4", recommendation.title || "成长项目"));
+    const projectBinding = careerProjectBindingBlock(recommendation);
+    if (projectBinding) {
+      card.append(projectBinding);
+    }
     card.append(careerMetaBlock("为什么适合", recommendation.why_it_fits));
     const skills = document.createElement("ul");
     renderList(skills, recommendation.skills_to_build || [], "暂未列出技能。");
@@ -1366,9 +1399,118 @@ function careerRecommendationsBlock(recommendations) {
     card.append(careerMetaBlock("第一步", recommendation.first_step));
     card.append(careerMetaBlock("风险", recommendation.risks));
     card.append(careerMetaBlock("不建议现在做的理由", recommendation.not_now_reason));
+    card.append(careerRecommendationActionBlock(recommendation, message, index));
     section.append(card);
   });
   return section;
+}
+
+function careerProjectBindingBlock(recommendation) {
+  const binding = recommendation?.project_binding;
+  if (!binding?.project_name) {
+    return null;
+  }
+  const block = document.createElement("section");
+  block.className = "career-project-binding";
+  const label = binding.kind === "existing_project" ? "加入已有项目" : "新建项目";
+  block.append(textBlock("span", `${label}：${binding.project_name}`));
+  if (binding.reason) {
+    block.append(textBlock("p", binding.reason));
+  }
+  return block;
+}
+
+function careerRecommendationActionBlock(recommendation, message, index) {
+  const block = document.createElement("section");
+  block.className = "career-recommendation-action";
+  const adoption = recommendation?.adoption || null;
+  if (adoption) {
+    const goalText = adoption.daily_goal_id ? `目标 #${adoption.daily_goal_id}` : "下个工作日承接";
+    block.append(textBlock("p", `已加入「${adoption.project_name || "当前项目"}」 · ${goalText}`));
+    return block;
+  }
+
+  if (!message?.id) {
+    block.append(textBlock("p", "刷新会话后可执行这个建议。"));
+    return block;
+  }
+
+  const button = document.createElement("button");
+  button.className = "text-button";
+  button.type = "button";
+  button.textContent = "执行这个建议";
+  button.addEventListener("click", () => {
+    adoptCareerRecommendation(button, block, message.id, index, { mode: "auto" });
+  });
+  block.append(button);
+  return block;
+}
+
+async function adoptCareerRecommendation(button, block, messageId, recommendationIndex, options) {
+  hideAlert();
+  setBusy(button, true);
+  try {
+    const body = {
+      message_id: Number(messageId),
+      recommendation_index: recommendationIndex,
+      mode: options.mode || "auto",
+    };
+    if (options.projectId) {
+      body.project_id = Number(options.projectId);
+    }
+    const payload = await requestJson("/api/career-chat/recommendation-adoption", {
+      method: "POST",
+      body,
+    });
+    if (payload.status === "needs_project_choice") {
+      renderCareerProjectChoice(block, messageId, recommendationIndex, payload.candidates || []);
+      return;
+    }
+    showAlert(payload.message || "职业建议已加入今日目标。");
+    await loadTodayGoal();
+    if (currentCareerSessionId) {
+      await loadCareerHistory(currentCareerSessionId);
+    }
+  } catch (error) {
+    showAlert(errorMessage(error));
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+function renderCareerProjectChoice(block, messageId, recommendationIndex, candidates) {
+  block.replaceChildren();
+  block.append(textBlock("p", "这个建议可能属于多个当前项目。"));
+  const select = document.createElement("select");
+  select.setAttribute("aria-label", "选择项目");
+  candidates.forEach((project) => {
+    const option = document.createElement("option");
+    option.value = String(project.id);
+    option.textContent = project.name || `项目 ${project.id}`;
+    select.append(option);
+  });
+  const useExisting = document.createElement("button");
+  useExisting.className = "text-button";
+  useExisting.type = "button";
+  useExisting.textContent = "加入所选项目";
+  useExisting.disabled = !candidates.length;
+  useExisting.addEventListener("click", () => {
+    adoptCareerRecommendation(useExisting, block, messageId, recommendationIndex, {
+      mode: "existing_project",
+      projectId: select.value,
+    });
+  });
+  const createNew = document.createElement("button");
+  createNew.className = "text-button secondary";
+  createNew.type = "button";
+  createNew.textContent = "建为新项目";
+  createNew.addEventListener("click", () => {
+    adoptCareerRecommendation(createNew, block, messageId, recommendationIndex, { mode: "new_project" });
+  });
+  const controls = document.createElement("div");
+  controls.className = "career-recommendation-choice";
+  controls.append(select, useExisting, createNew);
+  block.append(controls);
 }
 
 function careerMetaBlock(label, value) {

@@ -45,6 +45,9 @@ TABLE_COLUMNS: dict[str, set[str]] = {
         "weekday",
         "is_workday",
         "status",
+        "goal_source",
+        "source_payload",
+        "display_order",
         "active_version_id",
         "context_snapshot",
         "revision_count",
@@ -291,6 +294,20 @@ TABLE_COLUMNS: dict[str, set[str]] = {
         "created_at",
         "updated_at",
     },
+    "career_recommendation_actions": {
+        "id",
+        "session_id",
+        "message_id",
+        "recommendation_index",
+        "status",
+        "action",
+        "project_id",
+        "daily_goal_id",
+        "recommendation_snapshot",
+        "source_payload",
+        "created_at",
+        "updated_at",
+    },
 }
 
 JSON_FIELDS: dict[str, set[str]] = {
@@ -302,7 +319,7 @@ JSON_FIELDS: dict[str, set[str]] = {
         "workday_rule",
     },
     "projects": {"project_state"},
-    "daily_goals": {"context_snapshot"},
+    "daily_goals": {"context_snapshot", "source_payload"},
     "goal_versions": {"success_criteria", "critic_result"},
     "daily_checkins": {
         "completed_items",
@@ -346,6 +363,7 @@ JSON_FIELDS: dict[str, set[str]] = {
         "llm_metadata",
     },
     "career_profile_update_suggestions": {"suggestion_payload"},
+    "career_recommendation_actions": {"recommendation_snapshot", "source_payload"},
 }
 
 UPDATED_AT_TABLES = {
@@ -359,6 +377,7 @@ UPDATED_AT_TABLES = {
     "weekly_focus",
     "career_chat_sessions",
     "career_profile_update_suggestions",
+    "career_recommendation_actions",
 }
 
 PROJECT_STATE_SCHEMA_VERSION = "project_state.v1"
@@ -582,6 +601,16 @@ def create_daily_goal(connection: sqlite3.Connection, **daily_goal: Any) -> int:
         goal.setdefault("is_workday", int(is_workday(goal_date)))
     if not goal.get("project_id"):
         goal["project_id"] = _ensure_default_project(connection)
+    goal.setdefault("goal_source", "daily_planning")
+    goal.setdefault("source_payload", {})
+    goal.setdefault(
+        "display_order",
+        next_daily_goal_display_order(
+            connection,
+            str(goal["goal_date"]),
+            int(goal["project_id"]),
+        ),
+    )
     return _insert(connection, "daily_goals", goal)
 
 
@@ -593,7 +622,12 @@ def get_daily_goal_by_date(connection: sqlite3.Connection, goal_date: str) -> Re
     return _fetch_one(
         connection,
         "daily_goals",
-        "SELECT * FROM daily_goals WHERE goal_date = ? ORDER BY project_id, id",
+        """
+        SELECT *
+        FROM daily_goals
+        WHERE goal_date = ? AND goal_source = 'daily_planning'
+        ORDER BY project_id, display_order, id
+        """,
         (goal_date,),
     )
 
@@ -606,7 +640,12 @@ def get_daily_goal_by_date_and_project(
     return _fetch_one(
         connection,
         "daily_goals",
-        "SELECT * FROM daily_goals WHERE goal_date = ? AND project_id = ?",
+        """
+        SELECT *
+        FROM daily_goals
+        WHERE goal_date = ? AND project_id = ? AND goal_source = 'daily_planning'
+        ORDER BY display_order, id
+        """,
         (goal_date, project_id),
     )
 
@@ -615,9 +654,21 @@ def list_daily_goals_by_date(connection: sqlite3.Connection, goal_date: str) -> 
     return _fetch_all(
         connection,
         "daily_goals",
-        "SELECT * FROM daily_goals WHERE goal_date = ? ORDER BY project_id, id",
+        "SELECT * FROM daily_goals WHERE goal_date = ? ORDER BY project_id, display_order, id",
         (goal_date,),
     )
+
+
+def next_daily_goal_display_order(connection: sqlite3.Connection, goal_date: str, project_id: int) -> int:
+    row = connection.execute(
+        """
+        SELECT COALESCE(MAX(display_order), 0) + 1 AS next_order
+        FROM daily_goals
+        WHERE goal_date = ? AND project_id = ?
+        """,
+        (goal_date, project_id),
+    ).fetchone()
+    return int(row["next_order"] if row is not None else 1)
 
 
 def update_daily_goal(connection: sqlite3.Connection, daily_goal_id: int, **changes: Any) -> Record | None:
@@ -637,7 +688,7 @@ def list_daily_goals_by_week(
     return _fetch_all(
         connection,
         "daily_goals",
-        f"SELECT * FROM daily_goals WHERE {where} ORDER BY weekday, goal_date, project_id, id",
+        f"SELECT * FROM daily_goals WHERE {where} ORDER BY weekday, goal_date, project_id, display_order, id",
         params,
     )
 
@@ -655,7 +706,7 @@ def list_recent_daily_goal_records(
         SELECT *
         FROM daily_goals
         WHERE goal_date < ?
-        ORDER BY goal_date DESC, project_id, id
+        ORDER BY goal_date DESC, project_id, display_order, id
         LIMIT ?
         """,
         (before_date, limit),
@@ -683,7 +734,7 @@ def list_recent_daily_goal_records_for_project(
         SELECT *
         FROM daily_goals
         WHERE goal_date < ? AND project_id = ?
-        ORDER BY goal_date DESC, id DESC
+        ORDER BY goal_date DESC, display_order, id
         LIMIT ?
         """,
         (before_date, project_id, limit),
@@ -715,7 +766,7 @@ def list_daily_goal_records_between(
         SELECT *
         FROM daily_goals
         WHERE goal_date BETWEEN ? AND ?
-        ORDER BY goal_date DESC, project_id, id
+        ORDER BY goal_date DESC, project_id, display_order, id
         """,
         (start_date, end_date),
     )
@@ -1201,6 +1252,56 @@ def list_pending_career_profile_update_suggestions(
         LIMIT ?
         """,
         params,
+    )
+
+
+def create_career_recommendation_action(connection: sqlite3.Connection, **action: Any) -> int:
+    return _insert(connection, "career_recommendation_actions", action)
+
+
+def get_career_recommendation_action(connection: sqlite3.Connection, action_id: int) -> Record | None:
+    return _fetch_by_id(connection, "career_recommendation_actions", action_id)
+
+
+def get_career_recommendation_action_by_source(
+    connection: sqlite3.Connection,
+    message_id: int,
+    recommendation_index: int,
+) -> Record | None:
+    return _fetch_one(
+        connection,
+        "career_recommendation_actions",
+        """
+        SELECT *
+        FROM career_recommendation_actions
+        WHERE message_id = ? AND recommendation_index = ?
+        """,
+        (message_id, recommendation_index),
+    )
+
+
+def update_career_recommendation_action(
+    connection: sqlite3.Connection,
+    action_id: int,
+    **changes: Any,
+) -> Record | None:
+    return _update(connection, "career_recommendation_actions", action_id, changes)
+
+
+def list_career_recommendation_actions_for_message(
+    connection: sqlite3.Connection,
+    message_id: int,
+) -> list[Record]:
+    return _fetch_all(
+        connection,
+        "career_recommendation_actions",
+        """
+        SELECT *
+        FROM career_recommendation_actions
+        WHERE message_id = ?
+        ORDER BY recommendation_index, id
+        """,
+        (message_id,),
     )
 
 

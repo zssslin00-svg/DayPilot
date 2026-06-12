@@ -30,6 +30,7 @@ CORE_TABLES = {
     "career_chat_sessions",
     "career_chat_messages",
     "career_profile_update_suggestions",
+    "career_recommendation_actions",
 }
 
 
@@ -239,6 +240,21 @@ def test_schema_and_repository_crud() -> None:
                     status="dismissed",
                 )
                 assert repo.list_pending_career_profile_update_suggestions(connection) == []
+                action_id = repo.create_career_recommendation_action(
+                    connection,
+                    session_id=career_session_id,
+                    message_id=assistant_message_id,
+                    recommendation_index=0,
+                    status="applied",
+                    action="existing_project_goal",
+                    project_id=daily_goal["project_id"],
+                    daily_goal_id=daily_goal_id,
+                    recommendation_snapshot={"title": "Agent eval mini project"},
+                    source_payload={"source": "test"},
+                )
+                action = repo.get_career_recommendation_action(connection, action_id)
+                assert action["recommendation_snapshot"]["title"] == "Agent eval mini project"
+                assert repo.get_career_recommendation_action_by_source(connection, assistant_message_id, 0)["id"] == action_id
 
                 retry_job_id = repo.create_soul_sync_retry_job(
                     connection,
@@ -395,10 +411,101 @@ def test_legacy_project_columns_migrate_to_project_state() -> None:
             connection.close()
 
 
+def test_legacy_daily_goal_unique_constraint_migrates_to_goal_sources() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = Path(temp_dir) / "legacy-daily-goals.sqlite3"
+        legacy = sqlite3.connect(db_path)
+        try:
+            legacy.executescript(
+                """
+                CREATE TABLE projects (
+                  id INTEGER PRIMARY KEY,
+                  name TEXT NOT NULL UNIQUE,
+                  priority TEXT NOT NULL DEFAULT 'P2'
+                    CHECK (priority IN ('P0', 'P1', 'P2')),
+                  role TEXT NOT NULL DEFAULT '',
+                  status TEXT NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'paused', 'completed', 'archived')),
+                  project_state TEXT NOT NULL DEFAULT '{}',
+                  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE daily_goals (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  profile_id INTEGER NOT NULL DEFAULT 1,
+                  project_id INTEGER NOT NULL,
+                  goal_date TEXT NOT NULL,
+                  week_id TEXT NOT NULL,
+                  weekday INTEGER NOT NULL CHECK (weekday BETWEEN 1 AND 7),
+                  is_workday INTEGER NOT NULL CHECK (is_workday IN (0, 1)),
+                  status TEXT NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'checked_in', 'skipped', 'archived')),
+                  active_version_id INTEGER,
+                  context_snapshot TEXT NOT NULL DEFAULT '{}',
+                  revision_count INTEGER NOT NULL DEFAULT 0 CHECK (revision_count >= 0),
+                  generated_at TEXT,
+                  checked_in_at TEXT,
+                  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                  UNIQUE (goal_date, project_id)
+                );
+                INSERT INTO projects (id, name, project_state)
+                VALUES (1, 'MiniAgent-RL', '{"schema_version":"project_state.v1"}');
+                INSERT INTO daily_goals (
+                  id, project_id, goal_date, week_id, weekday, is_workday, status, context_snapshot
+                )
+                VALUES (10, 1, '2026-06-09', '2026-W24', 2, 1, 'active', '{}');
+                """
+            )
+        finally:
+            legacy.close()
+
+        connection = initialize_database(db_path)
+        try:
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(daily_goals)").fetchall()
+            }
+            assert {"goal_source", "source_payload", "display_order"} <= columns
+            migrated = repo.get_daily_goal(connection, 10)
+            assert migrated["goal_source"] == "daily_planning"
+            with connection:
+                repo.create_user_profile(
+                    connection,
+                    id=1,
+                    long_term_direction="Legacy migration test profile.",
+                )
+                extra_goal_id = repo.create_daily_goal(
+                    connection,
+                    project_id=1,
+                    goal_date="2026-06-09",
+                    goal_source="career_recommendation",
+                    source_payload={"source": "test"},
+                    context_snapshot={},
+                    generated_at="2026-06-09 10:00:00",
+                )
+                assert repo.get_daily_goal(connection, extra_goal_id)["display_order"] == 2
+                try:
+                    repo.create_daily_goal(
+                        connection,
+                        project_id=1,
+                        goal_date="2026-06-09",
+                        context_snapshot={},
+                        generated_at="2026-06-09 11:00:00",
+                    )
+                except sqlite3.IntegrityError:
+                    pass
+                else:
+                    raise AssertionError("primary daily goal uniqueness should still be enforced")
+        finally:
+            connection.close()
+
+
 def main() -> None:
     test_schema_and_repository_crud()
     test_example_workweek_seed_and_queries()
     test_legacy_project_columns_migrate_to_project_state()
+    test_legacy_daily_goal_unique_constraint_migrates_to_goal_sources()
     print("PASS: database schema, repositories, seed data, and required queries verified")
 
 

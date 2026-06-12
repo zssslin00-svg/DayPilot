@@ -33,6 +33,7 @@ def initialize_database(
     _migrate_projects_project_state(connection)
     _migrate_project_lifecycle_delete_action(connection)
     _migrate_project_scoped_daily_goals(connection)
+    _create_daily_goal_indexes(connection)
     _migrate_project_checkins_completion_status(connection)
     _migrate_career_planning_schema(connection)
     _repair_daily_goal_checkin_status(connection)
@@ -285,7 +286,14 @@ def _migrate_project_scoped_daily_goals(connection: sqlite3.Connection) -> None:
         return
     table_sql = str(row["sql"] or "")
     columns = _table_columns(connection, "daily_goals")
-    needs_rebuild = "project_id" not in columns or "goal_date TEXT NOT NULL UNIQUE" in table_sql
+    needs_rebuild = (
+        "project_id" not in columns
+        or "goal_source" not in columns
+        or "source_payload" not in columns
+        or "display_order" not in columns
+        or "goal_date TEXT NOT NULL UNIQUE" in table_sql
+        or "UNIQUE (goal_date, project_id)" in table_sql
+    )
     if not needs_rebuild:
         return
 
@@ -310,6 +318,10 @@ def _migrate_project_scoped_daily_goals(connection: sqlite3.Connection) -> None:
                   is_workday INTEGER NOT NULL CHECK (is_workday IN (0, 1)),
                   status TEXT NOT NULL DEFAULT 'active'
                     CHECK (status IN ('active', 'checked_in', 'skipped', 'archived')),
+                  goal_source TEXT NOT NULL DEFAULT 'daily_planning'
+                    CHECK (goal_source IN ('daily_planning', 'career_recommendation')),
+                  source_payload TEXT NOT NULL DEFAULT '{}',
+                  display_order INTEGER NOT NULL DEFAULT 0 CHECK (display_order >= 0),
                   active_version_id INTEGER,
                   context_snapshot TEXT NOT NULL DEFAULT '{}',
                   revision_count INTEGER NOT NULL DEFAULT 0 CHECK (revision_count >= 0),
@@ -320,32 +332,45 @@ def _migrate_project_scoped_daily_goals(connection: sqlite3.Connection) -> None:
                   FOREIGN KEY (profile_id) REFERENCES user_profile(id),
                   FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
                   FOREIGN KEY (active_version_id) REFERENCES goal_versions(id)
-                    ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED,
-                  UNIQUE (goal_date, project_id)
+                    ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
                 );
                 """
             )
+            display_counters: dict[tuple[str, int], int] = {}
             for item in rows:
                 data = dict(item)
                 project_id = _project_id_for_migrated_goal(data, project_ids, default_project_id)
+                goal_date = str(data["goal_date"])
+                counter_key = (goal_date, project_id)
+                display_counters[counter_key] = display_counters.get(counter_key, 0) + 1
+                goal_source = str(data.get("goal_source") or "daily_planning")
+                if goal_source not in {"daily_planning", "career_recommendation"}:
+                    goal_source = "daily_planning"
+                display_order = data.get("display_order")
+                if display_order is None:
+                    display_order = display_counters[counter_key]
                 connection.execute(
                     """
                     INSERT OR IGNORE INTO daily_goals_new (
                       id, profile_id, project_id, goal_date, week_id, weekday, is_workday,
-                      status, active_version_id, context_snapshot, revision_count,
+                      status, goal_source, source_payload, display_order,
+                      active_version_id, context_snapshot, revision_count,
                       generated_at, checked_in_at, created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         data["id"],
                         data.get("profile_id", 1),
                         project_id,
-                        data["goal_date"],
+                        goal_date,
                         data["week_id"],
                         data["weekday"],
                         data["is_workday"],
                         data.get("status", "active"),
+                        goal_source,
+                        data.get("source_payload") or "{}",
+                        display_order,
                         data.get("active_version_id"),
                         data.get("context_snapshot") or "{}",
                         data.get("revision_count", 0),
@@ -623,4 +648,16 @@ def _completion_status_from_rate(value: object) -> str:
 def _create_daily_goal_indexes(connection: sqlite3.Connection) -> None:
     connection.execute("CREATE INDEX IF NOT EXISTS idx_daily_goals_week ON daily_goals(week_id, goal_date)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_daily_goals_status ON daily_goals(status, goal_date)")
-    connection.execute("CREATE INDEX IF NOT EXISTS idx_daily_goals_project_date ON daily_goals(project_id, goal_date)")
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_daily_goals_project_date
+        ON daily_goals(project_id, goal_date, display_order, id)
+        """
+    )
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_goals_primary_project_date
+        ON daily_goals(goal_date, project_id)
+        WHERE goal_source = 'daily_planning'
+        """
+    )

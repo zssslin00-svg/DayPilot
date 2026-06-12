@@ -179,13 +179,17 @@ def test_start_script_initializes_database_when_missing() -> None:
                     'soul_sync_retry_jobs',
                     'ability_state',
                     'weekly_reports',
-                    'weekly_focus'
+                    'weekly_focus',
+                    'career_chat_sessions',
+                    'career_chat_messages',
+                    'career_profile_update_suggestions',
+                    'career_recommendation_actions'
                   )
                 """
             ).fetchone()[0]
         finally:
             connection.close()
-        assert table_count == 12
+        assert table_count == 16
 
 
 def test_start_script_ignores_external_schema_path_when_preparing_runtime() -> None:

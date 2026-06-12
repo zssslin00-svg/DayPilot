@@ -12,6 +12,7 @@ from backend.config.runtime_paths import default_backup_dir
 from backend.config.settings import DayPilotSettings
 from backend.repositories import daypilot_repository as repo
 from backend.repositories.database import DEFAULT_DB_PATH, initialize_database
+from backend.services.career_recommendation_service import attach_recommendation_actions
 from backend.schemas.json_schema import validate_json_schema
 from backend.services.llm_client import generate_json_with_fallback
 from backend.services.soul_context import SOUL_PATH, load_soul_context
@@ -37,6 +38,19 @@ CAREER_CATEGORY_ORDER = [
     "personality_and_work_style",
     "development_intentions",
     "career_values_and_constraints",
+]
+CARD_PROMISE_PATTERNS = [
+    re.compile(
+        r"(?:下面|以下|下方|后面|最后|附上|给出|提供|列出|整理出|生成).{0,32}"
+        r"(?:项目卡片|最小项目卡片|结构化项目卡片|卡片|project cards?|recommendation cards?)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:两个|2个|两张|三张|3个|一个|1个).{0,24}"
+        r"(?:可立即启动|最小|项目|实验).{0,24}(?:卡片|project cards?|recommendation cards?)",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(?:择一|任选|选一个|可以|可).{0,24}加入\s*active", re.IGNORECASE),
 ]
 
 
@@ -69,6 +83,7 @@ class MockCareerPlanningAdapter:
         inferred_skills = _extract_skill_items(message)
         inferred_intentions = _extract_development_items(message)
         project_hint = _first_project_name(active_projects)
+        active_project_name = _first_active_project_name(active_projects)
 
         skills_text = "、".join((inferred_skills or known_skills or ["项目拆解", "AI 工具使用"])[:3])
         direction_text = "、".join((inferred_intentions or intentions or ["形成更灵活的职业能力组合"])[:2])
@@ -118,6 +133,7 @@ class MockCareerPlanningAdapter:
                 },
             )
 
+        _ensure_mock_recommendation_bindings(recommendations, active_project_name)
         suggestions = _profile_suggestions_from_message(message)
         if not suggestions and not any(_profile_items(career_profile, category) for category in CAREER_CATEGORY_ORDER):
             suggestions = [
@@ -188,13 +204,24 @@ def send_career_chat_message(
             mock_model_name=MOCK_MODEL_NAME,
             build_messages=lambda soul: _career_chat_messages(context, soul),
             mock_generate=lambda: MockCareerPlanningAdapter().generate(context),
-            validator=validate_career_chat_response,
+            validator=lambda output: validate_career_chat_response(
+                output,
+                active_project_names=_active_project_names(context),
+            ),
             normalizer=normalize_career_chat_response,
+            repair_hint={
+                "career_chat_semantics": (
+                    "If assistant_message promises project/recommendation cards, move those concrete "
+                    "options into recommendations or remove the promise. Each recommendation must include "
+                    "project_binding. For existing_project, copy active_projects[].name exactly. For "
+                    "new_project, use a distinct project name."
+                )
+            },
             settings=settings,
             soul_path=soul_path,
         )
         output = normalize_career_chat_response(llm_result.output)
-        validate_career_chat_response(output)
+        validate_career_chat_response(output, active_project_names=_active_project_names(context))
     except Exception as exc:  # noqa: BLE001 - API returns concise generation failure
         raise CareerChatGenerationError(_safe_error(exc)) from exc
 
@@ -220,6 +247,8 @@ def send_career_chat_message(
             assistant_message = repo.get_career_chat_message(connection, assistant_message_id)
             user_message = repo.get_career_chat_message(connection, user_message_id)
             session = repo.get_career_chat_session(connection, session_id)
+            if assistant_message is not None:
+                assistant_message = attach_recommendation_actions(connection, [assistant_message])[0]
     finally:
         connection.close()
 
@@ -237,7 +266,7 @@ def send_career_chat_message(
             "session": session,
             "user_message": user_message,
             "assistant_message": assistant_message,
-            "recommendations": output["recommendations"],
+            "recommendations": assistant_message.get("recommendations") if assistant_message else output["recommendations"],
             "profile_update_suggestions": suggestion_records,
             "career_profile_update": career_profile_update,
             "llm_metadata": llm_result.metadata,
@@ -338,6 +367,7 @@ def get_career_chat_history(db_path: str | Path, session_id: int) -> dict[str, A
         if session is None:
             raise CareerChatValidationError("career chat session not found.")
         messages = repo.list_career_chat_messages(connection, session_id)
+        messages = attach_recommendation_actions(connection, messages)
         suggestions = repo.list_pending_career_profile_update_suggestions(
             connection,
             session_id=session_id,
@@ -455,14 +485,20 @@ def sync_career_profile_to_soul(
         connection.close()
 
 
-def validate_career_chat_response(output: dict[str, Any]) -> None:
+def validate_career_chat_response(
+    output: dict[str, Any],
+    *,
+    active_project_names: list[str] | set[str] | tuple[str, ...] | None = None,
+) -> None:
     validate_json_schema(output, _load_career_chat_schema())
+    _validate_career_chat_semantics(output, active_project_names=active_project_names)
 
 
 def normalize_career_chat_response(output: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(output, dict):
         raise ValueError("career_chat_output_not_object")
     recommendations = _normalize_optional_recommendations(output.get("recommendations"))
+    _apply_project_bindings(recommendations, output.get("recommendations"))
     suggestions = _normalize_profile_update_suggestions(output.get("profile_update_suggestions"))
     message = _compact_text(output.get("assistant_message"), 1600, preserve_lines=True)
     if len(message) < 8:
@@ -477,6 +513,46 @@ def normalize_career_chat_response(output: dict[str, Any]) -> dict[str, Any]:
         "recommendations": recommendations,
         "profile_update_suggestions": suggestions,
     }
+
+
+def _validate_career_chat_semantics(
+    output: dict[str, Any],
+    *,
+    active_project_names: list[str] | set[str] | tuple[str, ...] | None = None,
+) -> None:
+    recommendations = output.get("recommendations") if isinstance(output.get("recommendations"), list) else []
+    message = str(output.get("assistant_message") or "")
+    if not recommendations and _assistant_promises_recommendation_cards(message):
+        raise ValueError("career_chat_promised_cards_without_structured_recommendations")
+    if active_project_names is None:
+        return
+    active_names = {str(name).strip() for name in active_project_names if str(name).strip()}
+    for index, recommendation in enumerate(recommendations):
+        binding = recommendation.get("project_binding") if isinstance(recommendation, dict) else None
+        if not isinstance(binding, dict):
+            raise ValueError(f"career_recommendation_missing_project_binding:{index}")
+        kind = str(binding.get("kind") or "").strip()
+        project_name = str(binding.get("project_name") or "").strip()
+        if kind == "existing_project" and project_name not in active_names:
+            raise ValueError(f"career_recommendation_unknown_existing_project:{index}")
+        if kind == "new_project" and project_name in active_names:
+            raise ValueError(f"career_recommendation_new_project_collides_with_active_project:{index}")
+
+
+def _assistant_promises_recommendation_cards(message: str) -> bool:
+    text = " ".join(str(message or "").split())
+    if not text:
+        return False
+    for pattern in CARD_PROMISE_PATTERNS:
+        match = pattern.search(text)
+        if match and not _has_nearby_card_negation(text, match.start()):
+            return True
+    return False
+
+
+def _has_nearby_card_negation(text: str, index: int) -> bool:
+    window = text[max(0, index - 3) : index + 1]
+    return any(token in window for token in ("不", "不是", "无需", "不用", "不要", "暂不", "不必"))
 
 
 def _load_career_chat_schema() -> dict[str, Any]:
@@ -556,9 +632,14 @@ You help the single local user decide how to use spare time for career growth ba
 Assistant text may provide clarifying questions, direction analysis, risk warnings, next steps, or project ideas.
 Keep assistant_message readable and brief: use 2 to 4 short Chinese paragraphs, no Markdown heading markers, and no long numbered project-card dump.
 Put concrete project or experiment options in recommendations instead of repeating full project cards inside assistant_message.
+If assistant_message says there are project cards/options below, recommendations must contain those cards.
 Do not create, update, or claim to create DayPilot projects, daily goals, check-ins, or weekly reports.
 Do not browse the web or invent market data. Make advice from the provided local context only.
 Structured recommendations are optional. When you include them, each must be a concrete project or experiment with a visible deliverable.
+Each recommendation must include project_binding.
+For project_binding.kind="existing_project", project_binding.project_name must exactly copy one active_projects[].name.
+For project_binding.kind="new_project", project_binding.project_name must be the new project name you want DayPilot to create or restore.
+Keep the recommendation title focused on the experiment or task; use project_binding for project ownership.
 If you infer stable user-profile facts with clear evidence, put them in profile_update_suggestions because DayPilot will save them automatically.
 Do not include temporary moods, one-off constraints, guesses, or sensitive conclusions in profile_update_suggestions.
 Use concise Chinese for user-facing text.
@@ -591,8 +672,12 @@ Use concise Chinese for user-facing text.
         "rules": [
             "recommendations may be an empty array when assistant_message is the better response.",
             "assistant_message should summarize direction and next-step reasoning; detailed project choices belong in recommendations.",
+            "If assistant_message promises project cards or says the user can choose one to join active, recommendations must be non-empty.",
             "Use structured recommendations only when concrete project cards help the user decide what to do next.",
             "Each structured recommendation must name a deliverable.",
+            "Each structured recommendation must include project_binding.",
+            "Use project_binding.kind='existing_project' only when project_binding.project_name exactly matches active_projects[].name.",
+            "Use project_binding.kind='new_project' when this is not a direct extension of an active project; project_name is the new project name.",
             "profile_update_suggestions are saved automatically, so include only stable and evidence-backed profile facts.",
             "Do not output Markdown fences.",
         ],
@@ -620,6 +705,14 @@ def _context_snapshot(context: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _active_project_names(context: dict[str, Any]) -> list[str]:
+    return [
+        str(project.get("name") or "").strip()
+        for project in context.get("active_projects") or []
+        if str(project.get("status") or "active") == "active" and str(project.get("name") or "").strip()
+    ]
+
+
 def _normalize_optional_recommendations(value: Any) -> list[dict[str, Any]]:
     raw_items = value if isinstance(value, list) else []
     recommendations = []
@@ -642,6 +735,36 @@ def _normalize_optional_recommendations(value: Any) -> list[dict[str, Any]]:
             }
         )
     return recommendations[:6]
+
+
+def _apply_project_bindings(recommendations: list[dict[str, Any]], raw_value: Any) -> None:
+    raw_items = raw_value if isinstance(raw_value, list) else []
+    valid_raw_items = [
+        item
+        for item in raw_items
+        if isinstance(item, dict) and len(_compact_text(item.get("title"), 90)) >= 4
+    ]
+    for recommendation, raw_item in zip(recommendations, valid_raw_items):
+        project_binding = _normalize_project_binding(raw_item.get("project_binding"))
+        if project_binding is not None:
+            recommendation["project_binding"] = project_binding
+
+
+def _normalize_project_binding(value: Any) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    kind = str(value.get("kind") or "").strip()
+    project_name = _compact_text(value.get("project_name"), 90)
+    if kind not in {"existing_project", "new_project"} or len(project_name) < 2:
+        return None
+    binding = {
+        "kind": kind,
+        "project_name": project_name,
+    }
+    reason = _compact_text(value.get("reason"), 180)
+    if reason:
+        binding["reason"] = reason
+    return binding
 
 
 def _normalize_recommendations(value: Any) -> list[dict[str, Any]]:
@@ -939,6 +1062,31 @@ def _first_project_name(projects: list[dict[str, Any]]) -> str:
         if name:
             return f"「{name}」"
     return "一个最贴近长期方向的候选项目"
+
+
+def _first_active_project_name(projects: list[dict[str, Any]]) -> str:
+    for project in projects:
+        if str(project.get("status") or "active") != "active":
+            continue
+        name = str(project.get("name") or "").strip()
+        if name:
+            return name
+    return ""
+
+
+def _ensure_mock_recommendation_bindings(recommendations: list[dict[str, Any]], active_project_name: str) -> None:
+    for recommendation in recommendations:
+        if isinstance(recommendation.get("project_binding"), dict):
+            continue
+        title = _compact_text(recommendation.get("title"), 90)
+        recommendation["project_binding"] = {
+            "kind": "existing_project" if active_project_name else "new_project",
+            "project_name": active_project_name or title or "Career Growth Project",
+            "reason": (
+                "Mock adapter binds the recommendation to the current active project when one exists; "
+                "otherwise it names a new project from the recommendation title."
+            ),
+        }
 
 
 def _session_title(message: str) -> str:

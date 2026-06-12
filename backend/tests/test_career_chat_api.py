@@ -104,6 +104,8 @@ def test_career_chat_api_endpoints() -> None:
             assert chat["session_id"] > 0
             assert chat["assistant_message"]["role"] == "assistant"
             assert isinstance(chat["recommendations"], list)
+            if chat["recommendations"]:
+                assert all("project_binding" in item for item in chat["recommendations"])
             assert chat["profile_update_suggestions"]
             assert {item["status"] for item in chat["profile_update_suggestions"]} == {"applied"}
             assert chat["career_profile_update"]["status"] == "applied"
@@ -142,6 +144,37 @@ def test_career_chat_api_endpoints() -> None:
                             "reason": "用于验证旧确认接口兼容性。",
                         },
                     )
+                    project_id = repo.create_project(
+                        connection,
+                        name="Agent eval",
+                        priority="P2",
+                        status="active",
+                    )
+                    recommendation_message_id = repo.create_career_chat_message(
+                        connection,
+                        session_id=int(chat["session_id"]),
+                        role="assistant",
+                        content="可以执行这个建议。",
+                        recommendations=[
+                            {
+                                "title": "Agent eval 对比实验",
+                                "why_it_fits": "它能把 Agent eval 项目推进成可复查实验。",
+                                "skills_to_build": ["Agent 评估"],
+                                "estimated_time": "45 分钟",
+                                "deliverable": "一份 Agent eval 对比记录",
+                                "first_step": "列出 3 个评估样例。",
+                                "project_binding": {
+                                    "kind": "existing_project",
+                                    "project_name": "Agent eval",
+                                    "reason": "承接当前 Agent eval 项目。",
+                                },
+                                "risks": "不要扩成完整评估平台。",
+                                "not_now_reason": "如果时间不足，先记录候选。",
+                            }
+                        ],
+                        profile_update_suggestions=[],
+                        context_snapshot={"source": "adoption-api-test"},
+                    )
             finally:
                 connection.close()
 
@@ -153,6 +186,16 @@ def test_career_chat_api_endpoints() -> None:
             assert status == 200
             assert applied["status"] == "applied"
             assert applied["career_profile"]
+
+            status, adopted = _request(
+                "POST",
+                f"{base}/api/career-chat/recommendation-adoption",
+                {"message_id": recommendation_message_id, "recommendation_index": 0},
+            )
+            assert status == 200
+            assert adopted["status"] == "applied"
+            assert adopted["project"]["id"] == project_id
+            assert adopted["goal"]["daily_goal"]["goal_source"] == "career_recommendation"
         finally:
             server.shutdown()
             server.server_close()

@@ -23,6 +23,10 @@ from backend.services.career_chat_service import (  # noqa: E402
     get_career_chat_sessions,
     send_career_chat_message,
 )
+from backend.services.career_recommendation_service import (  # noqa: E402
+    CareerRecommendationValidationError,
+    adopt_career_recommendation,
+)
 from backend.services.checkin_service import (  # noqa: E402
     CheckinPersistenceError,
     CheckinValidationError,
@@ -162,6 +166,10 @@ class DayPilotHandler(BaseHTTPRequestHandler):
 
         if path == "/api/career-chat/profile-suggestion":
             self._handle_career_profile_suggestion()
+            return
+
+        if path == "/api/career-chat/recommendation-adoption":
+            self._handle_career_recommendation_adoption()
             return
 
         self._send_json(404, {"error": "not_found"})
@@ -527,6 +535,26 @@ class DayPilotHandler(BaseHTTPRequestHandler):
             )
         except CareerChatValidationError as exc:
             self._send_json(400, {"error": "invalid_career_profile_suggestion", "detail": str(exc)})
+            return
+
+        self._send_json(200, result.payload)
+
+    def _handle_career_recommendation_adoption(self) -> None:
+        try:
+            payload = self._read_json_body()
+        except ValueError as exc:
+            self._send_json(400, {"error": "invalid_json", "detail": str(exc)})
+            return
+
+        try:
+            result = adopt_career_recommendation(
+                self.server.db_path,
+                payload,
+                today=self.server.today_provider(),
+                soul_path=self.server.soul_path,
+            )
+        except CareerRecommendationValidationError as exc:
+            self._send_json(400, {"error": "invalid_career_recommendation_adoption", "detail": str(exc)})
             return
 
         self._send_json(200, result.payload)
