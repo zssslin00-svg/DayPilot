@@ -30,7 +30,6 @@ const elements = {
   tomorrowDirection: document.querySelector("#tomorrow-direction"),
   checkinSubmit: document.querySelector("#checkin-submit"),
   historyList: document.querySelector("#history-list"),
-  weeklyGenerate: document.querySelector("#weekly-report-generate"),
   weeklyEmpty: document.querySelector("#weekly-empty"),
   weeklyContent: document.querySelector("#weekly-report-content"),
   weeklyWeek: document.querySelector("#weekly-report-week"),
@@ -56,7 +55,6 @@ let currentApiDate = null;
 let checkedInGoalDate = null;
 let checkedInGoalIds = new Set();
 let currentWeekId = null;
-let canGenerateWeeklyReport = false;
 let latestWeeklyBundle = null;
 let currentCareerSessionId = null;
 let careerLoaded = false;
@@ -79,7 +77,6 @@ function bindEvents() {
   elements.historyRefresh.addEventListener("click", loadHistory);
   elements.feedbackForm.addEventListener("submit", handleGoalFeedbackSubmit);
   elements.checkinForm.addEventListener("submit", handleCheckinSubmit);
-  elements.weeklyGenerate.addEventListener("click", handleWeeklyReportGenerate);
   elements.weeklyFeedbackForm.addEventListener("submit", handleWeeklyFeedbackSubmit);
   elements.careerNewSession.addEventListener("click", startNewCareerSession);
   elements.careerForm.addEventListener("submit", handleCareerChatSubmit);
@@ -670,8 +667,6 @@ async function saveCheckin(body, button) {
       body,
     });
     markTodayGoalCheckedIn(payload.checkin?.daily_goal_id || body.goal_id, payload.checkin);
-    canGenerateWeeklyReport = Boolean(payload.can_generate_weekly_report);
-    updateWeeklyGenerateButton();
     await loadHistory();
     const projectProgress = payload.project_progress_update || {};
     if (projectProgress.status === "failed") {
@@ -712,8 +707,6 @@ async function maybeAutoGenerateWeeklyReportAfterCheckin(checkinPayload, notices
     notices.push("周五 check-in 已保存，并已自动生成本周周报。");
   } catch (error) {
     notices.push(`check-in 已保存，但周报自动生成失败：${errorMessage(error)}`);
-  } finally {
-    updateWeeklyGenerateButton();
   }
 }
 
@@ -938,12 +931,6 @@ function syncTodayCheckin(records) {
     });
     renderVisibleTodayGoalCards(currentApiDate);
   }
-  canGenerateWeeklyReport = Boolean(
-    todayRecords.length &&
-      todayRecords.every((record) => record.daily_checkin) &&
-      todayRecords.some((record) => record.daily_goal?.weekday === 5),
-  );
-  updateWeeklyGenerateButton();
 }
 
 function renderLatestWeekly(reports) {
@@ -981,34 +968,6 @@ function renderWeeklyEmpty() {
   renderList(elements.weeklyReflection, []);
   renderWeeklyVersions([]);
   setWeeklyFeedbackEnabled(false);
-}
-
-async function handleWeeklyReportGenerate() {
-  const weekId = currentWeekId || currentGoalRecord?.daily_goal?.week_id;
-  if (!weekId) {
-    showAlert("还没有可生成周报的 week_id。");
-    return;
-  }
-
-  setBusy(elements.weeklyGenerate, true);
-  try {
-    const payload = await requestJson("/api/weekly-report/generate", {
-      method: "POST",
-      body: { week_id: weekId },
-    });
-    renderWeeklyReport({
-      weekly_report: payload.weekly_report,
-      report_output: payload.report_output,
-      versions: payload.weekly_report_versions,
-      weekly_focus: payload.weekly_focus,
-    });
-    await loadHistory();
-  } catch (error) {
-    showAlert(errorMessage(error));
-  } finally {
-    setBusy(elements.weeklyGenerate, false);
-    updateWeeklyGenerateButton();
-  }
 }
 
 async function handleWeeklyFeedbackSubmit(event) {
@@ -1587,10 +1546,6 @@ function setFormEnabled(form, enabled) {
 function setBusy(button, busy) {
   button.disabled = busy;
   button.classList.toggle("busy", busy);
-}
-
-function updateWeeklyGenerateButton() {
-  elements.weeklyGenerate.disabled = !canGenerateWeeklyReport;
 }
 
 function showAlert(message) {

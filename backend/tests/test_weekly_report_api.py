@@ -24,6 +24,51 @@ from backend.services import weekly_report_service as weekly_service  # noqa: E4
 from backend.services.weekly_report_resources import validate_weekly_report_output  # noqa: E402
 
 
+class FakeResponse:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.payload = payload
+
+    def __enter__(self) -> "FakeResponse":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return json.dumps(self.payload, ensure_ascii=False).encode("utf-8")
+
+
+class FakeDeepSeekSequence:
+    def __init__(self, *contents: dict[str, Any]) -> None:
+        self.contents = list(contents)
+        self.calls = 0
+        self.requests: list[Any] = []
+
+    def __call__(self, request: Any, *args: object, **kwargs: object) -> FakeResponse:
+        self.calls += 1
+        self.requests.append(request)
+        if not self.contents:
+            raise AssertionError("No fake DeepSeek response left")
+        return FakeResponse(self.contents.pop(0))
+
+
+def _deepseek_payload(output: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"fake-weekly-{len(json.dumps(output, ensure_ascii=False))}",
+        "model": "deepseek-v4-pro",
+        "choices": [{"message": {"role": "assistant", "content": json.dumps(output, ensure_ascii=False)}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+
+
+def _restore_env(values: dict[str, str | None]) -> None:
+    for key, value in values.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -128,7 +173,8 @@ def test_weekly_report_generates_persists_snapshot_and_focus() -> None:
         assert source_snapshot["feedback_message_ids"] == seeded["feedback_message_ids"]
         assert source_snapshot["ability_state_id"] == seeded["ability_state_id"]
         assert source_snapshot["friday_checkin_submitted"] is True
-        assert "quality_review" not in source_snapshot
+        assert source_snapshot["quality_review"]["passed"] is True
+        assert source_snapshot["quality_review"]["quality_score"] == 5
         assert set(source_snapshot["weekly_report_preferences"]) == {
             "style_preferences",
             "avoid_patterns",
@@ -143,7 +189,7 @@ def test_weekly_report_generates_persists_snapshot_and_focus() -> None:
             weekly_report = repo.get_weekly_report_by_week(connection, "2026-W24")
             assert weekly_report is not None
             assert weekly_report["source_snapshot"]["daily_goal_ids"] == seeded["daily_goal_ids"]
-            assert weekly_report["quality_score"] is None
+            assert weekly_report["quality_score"] == 5
             assert weekly_report["report_text"].startswith("本周完成工作")
             assert weekly_report["model_name"] == "mock-weekly-report-adapter"
             weekly_focus = repo.list_weekly_focus_for_report(connection, weekly_report["id"])
@@ -163,34 +209,166 @@ def test_weekly_report_generates_persists_snapshot_and_focus() -> None:
         assert second_payload["weekly_report"]["status"] == "regenerated"
 
 
-def test_schema_valid_report_is_not_blocked_by_quality_review() -> None:
+def test_schema_valid_vague_report_fails_quality_review() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
-        db_path = Path(temp_dir) / "weekly-report-no-quality-gate.sqlite3"
+        db_path = Path(temp_dir) / "weekly-report-quality-gate.sqlite3"
         _seed_workweek(db_path)
-
-        original_generate = weekly_service.MockWeeklyReportLLMAdapter.generate
-
-        def vague_report(self, snapshot: dict[str, Any]) -> dict[str, list[str]]:
-            return {
-                "completed_work": ["完成了很多相关工作", "继续完善相关工作内容"],
-                "next_week_plan": ["继续优化整体能力表现", "推进各项任务持续开展"],
-                "weekly_reflection": ["总体表现不错需要保持", "下周继续开发相关内容"],
-            }
-
-        weekly_service.MockWeeklyReportLLMAdapter.generate = vague_report
+        connection = initialize_database(db_path)
         try:
-            status, payload = _post_weekly_report(
-                date(2026, 6, 12),
-                db_path,
-                {"week_id": "2026-W24"},
+            snapshot = weekly_service.build_weekly_snapshot(
+                connection,
+                "2026-W24",
+                generated_on=date(2026, 6, 12),
             )
         finally:
-            weekly_service.MockWeeklyReportLLMAdapter.generate = original_generate
+            connection.close()
 
-        assert status == 200
-        validate_weekly_report_output(payload["report_output"])
-        assert payload["weekly_report"]["quality_score"] is None
-        assert "quality_review" not in payload["source_snapshot"]
+        vague_report = {
+            "completed_work": ["完成了很多相关工作", "继续完善相关工作内容"],
+            "next_week_plan": ["继续优化整体能力表现", "推进各项任务持续开展"],
+            "weekly_reflection": ["总体表现不错需要保持", "下周继续开发相关内容"],
+        }
+        review = weekly_service.review_weekly_report(vague_report, snapshot)
+
+        assert review["passed"] is False
+        assert review["quality_score"] == 2
+        assert any("空泛" in failure or "证据" in failure for failure in review["failures"])
+
+
+def test_deepseek_weekly_report_schema_overflow_uses_semantic_repair() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = Path(temp_dir) / "weekly-report-semantic-repair.sqlite3"
+        _seed_workweek(db_path)
+        sequence = FakeDeepSeekSequence(
+            _deepseek_payload(
+                {
+                    "completed_work": [
+                        "完成目标生成服务并留下可复查记录。",
+                        "完成 check-in 保存接口并留下可复查记录。",
+                        "完成后端周报聚合接口并留下可复查记录。",
+                        "完成在线反馈修正链路并记录验收结果。",
+                        "完成 Goal Critic 质量门的最小产出。",
+                        "完成周报生成规则和前端按钮联调。",
+                        "完成周报 eval 样例并验证基础结果。",
+                    ],
+                    "next_week_plan": [
+                        "交付下周重点承接的最小可验证闭环。",
+                        "补齐周报质量审查回归样例。",
+                        "验证 weekly_focus 选中与回填结果。",
+                        "记录前端周报按钮的验收结果。",
+                        "生成周报修复路径的回归记录。",
+                    ],
+                    "weekly_reflection": [
+                        "本周多次通过反馈收敛范围，下周需要更早切出最低版本。",
+                        "高难度目标集中在质量门和周报链路，下周应减少并行范围。",
+                    ],
+                }
+            ),
+            _deepseek_payload(
+                {
+                    "completed_work": [
+                        "完成目标生成、check-in 保存和周报聚合接口，留下可复查记录。",
+                        "完成在线反馈修正链路与 Goal Critic 质量门的最小产出。",
+                        "完成周报生成规则和前端按钮联调，形成三段式周报输出。",
+                    ],
+                    "next_week_plan": [
+                        "交付下周重点承接的最小可验证闭环，记录 weekly_focus 选中与回填结果。",
+                        "补齐周报质量审查回归样例，验证空话、流水账和虚构成果拦截。",
+                    ],
+                    "weekly_reflection": [
+                        "本周多次通过反馈收敛范围，下周需要更早切出最低版本。",
+                        "高难度目标集中在质量门和周报链路，下周应减少并行范围。",
+                    ],
+                }
+            ),
+        )
+        original_urlopen = urllib.request.urlopen
+        old_env = {
+            "DAYPILOT_LLM_MODE": os.environ.get("DAYPILOT_LLM_MODE"),
+            "DEEPSEEK_API_KEY": os.environ.get("DEEPSEEK_API_KEY"),
+            "DAYPILOT_PREFER_DOTENV": os.environ.get("DAYPILOT_PREFER_DOTENV"),
+        }
+        try:
+            urllib.request.urlopen = sequence  # type: ignore[assignment]
+            os.environ["DAYPILOT_LLM_MODE"] = "deepseek"
+            os.environ["DEEPSEEK_API_KEY"] = "fake-key"
+            os.environ["DAYPILOT_PREFER_DOTENV"] = "0"
+            result = weekly_service.generate_weekly_report(
+                db_path,
+                {"week_id": "2026-W24"},
+                default_date=date(2026, 6, 12),
+            )
+        finally:
+            urllib.request.urlopen = original_urlopen  # type: ignore[assignment]
+            _restore_env(old_env)
+
+        assert sequence.calls == 2
+        assert result.weekly_report["model_name"] == "deepseek-v4-pro"
+        assert result.source_snapshot["llm_metadata"]["schema_repair_triggered"] is True
+        assert result.source_snapshot["llm_metadata"]["schema_repair_succeeded"] is True
+        assert result.source_snapshot["llm_metadata"]["final_used_fallback"] is False
+        assert result.source_snapshot["quality_review"]["passed"] is True
+        assert len(result.report_output["completed_work"]) == 3
+
+        repair_payload = json.loads(sequence.requests[1].data.decode("utf-8"))
+        repair_user = json.loads(repair_payload["messages"][1]["content"])
+        assert repair_user["repair_hint"]["repair_mode"] == "semantic_compression"
+
+
+def test_deepseek_weekly_report_repair_failure_falls_back_to_mock_once() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = Path(temp_dir) / "weekly-report-repair-fallback.sqlite3"
+        _seed_workweek(db_path)
+        too_many = {
+            "completed_work": [f"完成目标生成服务相关产出 {index}，留下可复查记录。" for index in range(7)],
+            "next_week_plan": ["交付下周重点承接的最小可验证闭环。", "补齐周报质量审查回归样例。"],
+            "weekly_reflection": [
+                "本周多次通过反馈收敛范围，下周需要更早切出最低版本。",
+                "高难度目标集中在质量门和周报链路，下周应减少并行范围。",
+            ],
+        }
+        still_too_long = {
+            "completed_work": [
+                (
+                    "完成目标生成、check-in 保存、后端周报聚合、在线反馈修正、"
+                    "Goal Critic 质量门、前端按钮联调和周报 eval 样例等所有相关工作，"
+                    "并留下完整可复查记录。"
+                )
+            ],
+            "next_week_plan": ["交付下周重点承接的最小可验证闭环。", "补齐周报质量审查回归样例。"],
+            "weekly_reflection": [
+                "本周多次通过反馈收敛范围，下周需要更早切出最低版本。",
+                "高难度目标集中在质量门和周报链路，下周应减少并行范围。",
+            ],
+        }
+        sequence = FakeDeepSeekSequence(_deepseek_payload(too_many), _deepseek_payload(still_too_long))
+        original_urlopen = urllib.request.urlopen
+        old_env = {
+            "DAYPILOT_LLM_MODE": os.environ.get("DAYPILOT_LLM_MODE"),
+            "DEEPSEEK_API_KEY": os.environ.get("DEEPSEEK_API_KEY"),
+            "DAYPILOT_PREFER_DOTENV": os.environ.get("DAYPILOT_PREFER_DOTENV"),
+        }
+        try:
+            urllib.request.urlopen = sequence  # type: ignore[assignment]
+            os.environ["DAYPILOT_LLM_MODE"] = "deepseek"
+            os.environ["DEEPSEEK_API_KEY"] = "fake-key"
+            os.environ["DAYPILOT_PREFER_DOTENV"] = "0"
+            result = weekly_service.generate_weekly_report(
+                db_path,
+                {"week_id": "2026-W24"},
+                default_date=date(2026, 6, 12),
+            )
+        finally:
+            urllib.request.urlopen = original_urlopen  # type: ignore[assignment]
+            _restore_env(old_env)
+
+        assert sequence.calls == 2
+        metadata = result.source_snapshot["llm_metadata"]
+        assert result.weekly_report["model_name"] == "mock-weekly-report-adapter"
+        assert metadata["schema_repair_triggered"] is True
+        assert metadata["schema_repair_succeeded"] is False
+        assert metadata["final_used_fallback"] is True
+        assert metadata["repair_schema_failure_reason"]
 
 
 def test_weekly_report_rejects_before_friday_checkin() -> None:
@@ -346,7 +524,9 @@ def _seed_workweek(db_path: Path, *, include_friday_checkin: bool = True) -> dic
 
 def main() -> None:
     test_weekly_report_generates_persists_snapshot_and_focus()
-    test_schema_valid_report_is_not_blocked_by_quality_review()
+    test_schema_valid_vague_report_fails_quality_review()
+    test_deepseek_weekly_report_schema_overflow_uses_semantic_repair()
+    test_deepseek_weekly_report_repair_failure_falls_back_to_mock_once()
     test_weekly_report_rejects_before_friday_checkin()
     print("PASS: POST /api/weekly-report/generate creates weekly reports and source snapshots")
 

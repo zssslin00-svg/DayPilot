@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>DayPilot</title>
-    <link rel="stylesheet" href="/styles/main.css?v=20260610-feedback-tight-labels" />
-    <script type="module" src="/services/today-goal.js?v=20260610-feedback-tight-labels"></script>
+    <link rel="stylesheet" href="/styles/main.css?v=20260612-weekly-feedback-large" />
+    <script type="module" src="/services/today-goal.js?v=20260612-weekly-feedback-large"></script>
   </head>
   <body>
     <div class="paper-frame">
@@ -133,9 +133,6 @@
               <p class="eyebrow">Weekly</p>
               <h2 id="weekly-title">周报</h2>
             </div>
-            <button class="text-button secondary" id="weekly-report-generate" type="button" disabled>
-              生成本周周报
-            </button>
           </div>
 
           <article class="weekly-report" id="weekly-report-card">
@@ -164,7 +161,7 @@
             <h3>周报修改意见</h3>
             <label>
               <span>修改意见</span>
-              <textarea id="weekly-feedback-message" name="message" rows="3" required></textarea>
+              <textarea id="weekly-feedback-message" name="message" rows="6" required></textarea>
             </label>
             <button class="text-button" id="weekly-feedback-submit" type="submit" disabled>
               重生成周报

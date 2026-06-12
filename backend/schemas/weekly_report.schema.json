@@ -9,11 +9,11 @@
     "completed_work": {
       "type": "array",
       "minItems": 2,
-      "maxItems": 4,
+      "maxItems": 6,
       "items": {
         "type": "string",
         "minLength": 8,
-        "maxLength": 60
+        "maxLength": 120
       }
     },
     "next_week_plan": {
@@ -23,7 +23,7 @@
       "items": {
         "type": "string",
         "minLength": 8,
-        "maxLength": 60
+        "maxLength": 100
       }
     },
     "weekly_reflection": {
@@ -33,7 +33,7 @@
       "items": {
         "type": "string",
         "minLength": 8,
-        "maxLength": 70
+        "maxLength": 120
       }
     }
   }

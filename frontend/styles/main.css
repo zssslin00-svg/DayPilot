@@ -741,6 +741,15 @@ button:focus-visible {
   gap: 2px;
 }
 
+#weekly-feedback-form {
+  gap: 14px;
+  padding: 20px;
+}
+
+#weekly-feedback-message {
+  min-height: 190px;
+}
+
 .version-panel {
   margin-top: 15px;
   padding: 17px;

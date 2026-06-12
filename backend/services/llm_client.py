@@ -749,6 +749,7 @@ def _try_repair_generation(
             initial_failure_reason=initial_failure.reason,
         )
         metadata["repair_of_event_id"] = initial_failure.event_id
+        metadata["repair_prompt_version"] = repair_prompt_version
         write_llm_log(
             settings,
             "deepseek",
@@ -940,28 +941,51 @@ def _repair_messages(
     *,
     repair_hint: dict[str, Any] | None,
 ) -> list[dict[str, str]]:
-    repair_payload = {
-        "original_messages": original_messages,
-        "previous_raw_output": previous_raw_output,
-        "failure_reason": failure_reason,
-        "repair_hint": repair_hint or {},
-        "required_action": (
+    hint = repair_hint or {}
+    semantic_compression = bool(hint.get("semantic_compression")) or (
+        hint.get("repair_mode") == "semantic_compression"
+    )
+    if semantic_compression:
+        system_content = (
+            "You repair and semantically compress failed DayPilot structured outputs. "
+            "Return only one valid JSON object that conforms to the original task schema. "
+            "Do not include Markdown, code fences, comments, or extra prose. You may "
+            "merge, shorten, and rewrite list items to satisfy maxItems and maxLength "
+            "while preserving the strongest evidence-backed business meaning."
+        )
+        required_action = (
+            "Repair the previous model response by semantically compressing it. Return "
+            "exactly one JSON object that satisfies the original task schema. If a list "
+            "has too many items, merge related items by project or theme and drop weaker "
+            "details. If an item is too long, rewrite it as a shorter sentence instead "
+            "of truncating it. Preserve facts, evidence, explicit outcomes, and user "
+            "constraints. Do not add fields, Markdown, code fences, comments, or prose."
+        )
+    else:
+        system_content = (
+            "You repair failed DayPilot structured outputs. Return only one "
+            "valid JSON object that conforms to the original task schema. "
+            "Do not include Markdown, code fences, or extra prose. Keep the "
+            "original intent and only repair schema/format violations."
+        )
+        required_action = (
             "Repair the previous model response. Return exactly one JSON object "
             "that satisfies the original task schema. Do not add Markdown, code "
             "fences, comments, or explanatory text. Preserve the business meaning "
             "of the previous response; only fix JSON shape, field names, enum "
             "values, required fields, and simple scalar/list formatting."
-        ),
+        )
+    repair_payload = {
+        "original_messages": original_messages,
+        "previous_raw_output": previous_raw_output,
+        "failure_reason": failure_reason,
+        "repair_hint": hint,
+        "required_action": required_action,
     }
     return [
         {
             "role": "system",
-            "content": (
-                "You repair failed DayPilot structured outputs. Return only one "
-                "valid JSON object that conforms to the original task schema. "
-                "Do not include Markdown, code fences, or extra prose. Keep the "
-                "original intent and only repair schema/format violations."
-            ),
+            "content": system_content,
         },
         {
             "role": "user",

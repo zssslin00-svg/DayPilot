@@ -34,10 +34,63 @@ VAGUE_PHRASES = [
     "完成了很多工作",
     "下周继续开发",
     "总体表现不错",
+    "继续学习",
+    "继续研究",
+    "持续推进",
+    "优化完善",
+    "看看",
+    "研究一下",
 ]
 WEEKDAY_WORDS = ["周一", "周二", "周三", "周四", "周五", "星期一", "星期二", "星期三", "星期四", "星期五"]
-OUTCOME_VERBS = ["完成", "交付", "跑通", "形成", "验证", "补齐", "定稿", "收敛"]
-RESULT_WORDS = ["闭环", "结果", "记录", "接口", "页面", "测试", "样例", "报告", "周报", "重点", "版本", "产出", "规则"]
+OUTCOME_VERBS = [
+    "完成",
+    "交付",
+    "跑通",
+    "形成",
+    "验证",
+    "补齐",
+    "定稿",
+    "收敛",
+    "产出",
+    "记录",
+    "生成",
+    "汇总",
+    "运行",
+    "启动",
+    "通过",
+    "写出",
+    "补充",
+]
+RESULT_WORDS = [
+    "闭环",
+    "结果",
+    "记录",
+    "接口",
+    "页面",
+    "测试",
+    "样例",
+    "报告",
+    "周报",
+    "重点",
+    "版本",
+    "产出",
+    "规则",
+    "文档",
+    "笔记",
+    "数据集",
+    "指标",
+    "变化",
+    "质检",
+    "实验",
+    "召回率",
+    "loss",
+    "success",
+]
+WEEKLY_REPORT_FIELD_LIMITS = {
+    "completed_work": {"min_items": 2, "max_items": 6, "max_chars": 120},
+    "next_week_plan": {"min_items": 2, "max_items": 4, "max_chars": 100},
+    "weekly_reflection": {"min_items": 2, "max_items": 4, "max_chars": 120},
+}
 
 
 @dataclass(frozen=True)
@@ -108,6 +161,7 @@ def generate_weekly_report(
                     else MockWeeklyReportLLMAdapter().generate(snapshot)
                 ),
                 validator=validate_weekly_report_output,
+                repair_hint=_weekly_report_repair_hint(snapshot, feedback_message=feedback_message),
             )
             report_output = llm_result.output
             quality_review = review_weekly_report(report_output, snapshot)
@@ -126,8 +180,9 @@ def generate_weekly_report(
             report_text = render_weekly_report_text(report_output)
             focus_candidates = extract_weekly_focus(report_output, snapshot, llm_result.metadata)
             source_snapshot = dict(snapshot["source_snapshot"])
-            source_snapshot["llm_metadata"] = llm_result.metadata
+            source_snapshot["llm_metadata"] = _weekly_report_llm_metadata(llm_result.metadata)
             source_snapshot["weekly_report_preferences"] = snapshot["weekly_report_preferences"]
+            source_snapshot["quality_review"] = _quality_review_snapshot(quality_review)
 
             weekly_report_payload = {
                 "week_id": week_id,
@@ -141,7 +196,7 @@ def generate_weekly_report(
                 "report_text": report_text,
                 "source_snapshot": source_snapshot,
                 "next_week_focus_summary": "；".join(item["focus_text"] for item in focus_candidates[:3]),
-                "quality_score": None,
+                "quality_score": quality_review["quality_score"],
                 "prompt_version": llm_result.metadata["prompt_version"],
                 "model_name": llm_result.metadata["model_name"],
             }
@@ -402,9 +457,9 @@ Use concise Chinese. Do not invent completed work that is not supported by the s
     user = {
         "task": "Generate a weekly report after Friday check-in.",
         "schema": {
-            "completed_work": "2-4 evidence-backed bullets",
-            "next_week_plan": "2-4 outcome-oriented bullets",
-            "weekly_reflection": "2-4 reflection bullets",
+            "completed_work": "2-6 evidence-backed bullets, each under 120 Chinese characters",
+            "next_week_plan": "2-4 outcome-oriented bullets, each under 100 Chinese characters",
+            "weekly_reflection": "2-4 reflection bullets, each under 120 Chinese characters",
         },
         "snapshot": snapshot,
     }
@@ -436,6 +491,8 @@ Keep completed_work, next_week_plan, and weekly_reflection as arrays of concise 
             "keep facts evidence-backed",
             "make next_week_plan outcome-oriented",
             "do not include weekday-by-weekday logs",
+            "completed_work may contain 2-6 bullets under 120 Chinese characters each",
+            "next_week_plan and weekly_reflection may contain 2-4 bullets each",
             "return only JSON",
         ],
     }
@@ -443,6 +500,69 @@ Keep completed_work, next_week_plan, and weekly_reflection as arrays of concise 
         {"role": "system", "content": system},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False, default=str)},
     ]
+
+
+def _weekly_report_repair_hint(
+    snapshot: dict[str, Any],
+    *,
+    feedback_message: str | None,
+) -> dict[str, Any]:
+    return {
+        "task_schema": "weekly_report.v2",
+        "repair_mode": "semantic_compression",
+        "semantic_compression": True,
+        "field_limits": WEEKLY_REPORT_FIELD_LIMITS,
+        "compression_rules": [
+            "If completed_work has too many items, merge related items by project or theme.",
+            "If next_week_plan has too many items, keep the most verifiable target-week outcomes.",
+            "If any item is too long, rewrite it as a shorter Chinese sentence instead of truncating it.",
+            "Do not invent completed work; keep completed_work backed by snapshot evidence.",
+            "Do not move unfinished or planned work into completed_work.",
+            "Keep weekly_reflection focused on scope, rhythm, revision, difficulty, evidence, or parallel-work tradeoffs.",
+        ],
+        "preserve_priority": [
+            "P0/main project outcomes",
+            "explicit files, reports, notes, data, tests, metrics, or runnable artifacts",
+            "user-provided next-week direction candidates rewritten as verifiable outcomes",
+            "revision and difficulty signals that explain next-week scope control",
+        ],
+        "week_id": snapshot["week_id"],
+        "daily_records_count": len(snapshot.get("daily_records") or []),
+        "week_unfinished_items": snapshot.get("week_unfinished_items") or [],
+        "next_week_direction_candidates": snapshot.get("next_week_direction_candidates") or [],
+        "revision_summary": snapshot.get("revision_summary") or {},
+        "difficulty_summary": snapshot.get("difficulty_summary") or {},
+        "feedback_message": feedback_message or None,
+    }
+
+
+def _weekly_report_llm_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(metadata)
+    fallback_reason = str(enriched.get("fallback_reason") or "")
+    initial_reason = str(enriched.get("initial_failure_reason") or "")
+    repair_reason = str(enriched.get("repair_failure_reason") or "")
+    enriched["semantic_repair_enabled"] = True
+    enriched["schema_repair_triggered"] = bool(enriched.get("repair_attempted"))
+    enriched["schema_repair_succeeded"] = bool(enriched.get("repair_succeeded"))
+    enriched["final_used_fallback"] = bool(fallback_reason and enriched.get("llm_mode_used") == "mock")
+    enriched["initial_schema_failure_reason"] = initial_reason or None
+    enriched["repair_schema_failure_reason"] = repair_reason or None
+    enriched["schema_limit_failure"] = _looks_schema_limit_failure(
+        " ".join(item for item in [initial_reason, repair_reason, fallback_reason] if item)
+    )
+    return enriched
+
+
+def _looks_schema_limit_failure(reason: str) -> bool:
+    return any(token in reason for token in ("max", "at most", "min", "at least", "characters", "items"))
+
+
+def _quality_review_snapshot(review: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "passed": bool(review.get("passed")),
+        "failures": [str(item) for item in review.get("failures", [])],
+        "quality_score": review.get("quality_score"),
+    }
 
 
 def _mock_weekly_report_feedback(
@@ -464,11 +584,6 @@ def _mock_weekly_report_feedback(
 
 
 def review_weekly_report(report: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "passed": True,
-        "failures": [],
-        "quality_score": None,
-    }
     failures: list[str] = []
     try:
         validate_weekly_report_output(report)
@@ -482,7 +597,7 @@ def review_weekly_report(report: dict[str, Any], snapshot: dict[str, Any]) -> di
             text = str(bullet)
             if any(phrase in text for phrase in VAGUE_PHRASES):
                 failures.append(f"{section_name} 包含空泛表达：{text}")
-            if any(word in text for word in WEEKDAY_WORDS):
+            if any(word in text for word in WEEKDAY_WORDS) or _looks_date_log(text):
                 failures.append(f"{section_name} 包含按日期流水账表达：{text}")
 
     evidence_text = _evidence_text(snapshot)
@@ -507,15 +622,60 @@ def review_weekly_report(report: dict[str, Any], snapshot: dict[str, Any]) -> di
 
 def repair_weekly_report(report: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, list[str]]:
     repaired = MockWeeklyReportLLMAdapter().generate(snapshot)
+    evidence_text = _evidence_text(snapshot)
     for key in ("completed_work", "next_week_plan", "weekly_reflection"):
+        preserved: list[str] = []
         if key in report and isinstance(report[key], list):
-            repaired[key] = _unique_sentences([str(item) for item in report[key]] + repaired[key], limit=4)
+            for item in report[key]:
+                text = str(item).strip()
+                if not text:
+                    continue
+                if _has_basic_quality_failure(key, text, evidence_text):
+                    continue
+                preserved.append(text)
+        repaired[key] = _unique_sentences(
+            preserved + _filter_quality_fallback(key, repaired[key], evidence_text),
+            limit=int(WEEKLY_REPORT_FIELD_LIMITS[key]["max_items"]),
+        )
     baseline = MockWeeklyReportLLMAdapter().generate(snapshot)
     return {
-        "completed_work": _pad_section(repaired["completed_work"], baseline["completed_work"]),
-        "next_week_plan": _pad_section(repaired["next_week_plan"], baseline["next_week_plan"]),
-        "weekly_reflection": _pad_section(repaired["weekly_reflection"], baseline["weekly_reflection"]),
+        "completed_work": _pad_section(
+            repaired["completed_work"],
+            _filter_quality_fallback("completed_work", baseline["completed_work"], evidence_text),
+        ),
+        "next_week_plan": _pad_section(
+            repaired["next_week_plan"],
+            _filter_quality_fallback("next_week_plan", baseline["next_week_plan"], evidence_text),
+        ),
+        "weekly_reflection": _pad_section(
+            repaired["weekly_reflection"],
+            _filter_quality_fallback("weekly_reflection", baseline["weekly_reflection"], evidence_text),
+        ),
     }
+
+
+def _has_basic_quality_failure(section_name: str, text: str, evidence_text: str) -> bool:
+    if any(phrase in text for phrase in VAGUE_PHRASES):
+        return True
+    if any(word in text for word in WEEKDAY_WORDS) or _looks_date_log(text):
+        return True
+    if section_name == "completed_work" and not _has_evidence(text, evidence_text):
+        return True
+    if section_name == "next_week_plan" and not _is_outcome_goal(text):
+        return True
+    return False
+
+
+def _filter_quality_fallback(section_name: str, items: list[str], evidence_text: str) -> list[str]:
+    return [
+        str(item)
+        for item in items
+        if not _has_basic_quality_failure(section_name, str(item), evidence_text)
+    ]
+
+
+def _looks_date_log(text: str) -> bool:
+    return re.search(r"(^|\s)(20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2})[：:]", text) is not None
 
 
 def extract_weekly_focus(
@@ -741,9 +901,17 @@ def _evidence_tokens(text: str) -> list[str]:
     text = _strip_leading_result_verb(text)
     cleaned = re.sub(r"[，。、；:：.()\s]+", " ", text)
     tokens = [item for item in cleaned.split(" ") if len(item) >= 2]
-    if tokens:
-        return tokens
-    return [text[index : index + 4] for index in range(0, max(0, len(text) - 3), 2)]
+    candidates = tokens or [text]
+    result: list[str] = []
+    for token in candidates:
+        result.append(token)
+        if _contains_cjk(token) and len(token) >= 4:
+            result.extend(token[index : index + 4] for index in range(0, len(token) - 3, 2))
+    return _unique_text(result)
+
+
+def _contains_cjk(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in text)
 
 
 def _is_outcome_goal(text: str) -> bool:
