@@ -228,6 +228,8 @@ def main() -> None:
                 'id="weekly-report-versions"',
                 'id="career-chat-form"',
                 'id="career-message-list"',
+                'class="career-composer-title"',
+                'id="career-composer-hint"',
                 'id="app-alert"',
                 'id="goal-card"',
                 'id="checkin-form"',
@@ -247,6 +249,12 @@ def main() -> None:
             assert 'id="project-lifecycle-form"' not in homepage
             assert "项目更新" not in homepage
             assert "今天可投入分钟数" not in homepage
+            assert "直接说你在想什么，例如" not in homepage
+            career_textarea_start = homepage.index('id="career-chat-message"')
+            career_textarea_end = homepage.index("</textarea>", career_textarea_start)
+            career_textarea_html = homepage[career_textarea_start:career_textarea_end]
+            assert "placeholder=" not in career_textarea_html
+            assert "required" not in career_textarea_html
             frontend_js = _read_text(f"{frontend_base}/services/today-goal.js")
             for marker in [
                 "checkedInGoalIds",
@@ -256,12 +264,38 @@ def main() -> None:
                 "/api/soul-sync/import-projects",
                 "careerRecommendationsBlock",
                 "今天的项目都已 check-in",
+                "todayGoalRequestInFlight",
+                "regenerateTodayGoal({ rethrow: true })",
+                "beginTodayGoalRequest",
+                "endTodayGoalRequest",
+                "throw error",
+                "careerChatRequestInFlight",
+                "handleCareerComposerKeydown",
+                "event.isComposing",
+                "requestSubmit",
+                "appendCareerThinkingMessage",
+                "careerMessageElement",
+                "careerAssistantContent",
+                "cleanCareerMessageText",
+                "replaceCareerMessage",
             ]:
                 assert marker in frontend_js, f"frontend JS missing {marker}"
+            assert "soulImportPayload" not in frontend_js
             assert "available_minutes" not in frontend_js
             assert "/api/projects/lifecycle" not in frontend_js
             assert "/api/career-chat/profile-suggestion" not in frontend_js
             assert "career-profile-suggestions" not in homepage
+            frontend_css = _read_text(f"{frontend_base}/styles/main.css")
+            for marker in [
+                ".career-message.pending",
+                ".career-thinking::after",
+                "@keyframes career-thinking-dots",
+                ".career-message-body",
+                ".career-user-text",
+                ".career-composer-title",
+                ".career-composer-hint",
+            ]:
+                assert marker in frontend_css, f"frontend CSS missing {marker}"
 
             status, career_chat = _post_json(
                 f"{backend_base}/api/career-chat",

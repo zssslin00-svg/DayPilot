@@ -61,6 +61,8 @@ let latestWeeklyBundle = null;
 let currentCareerSessionId = null;
 let careerLoaded = false;
 let currentClientDate = chinaDateString();
+let todayGoalRequestInFlight = false;
+let careerChatRequestInFlight = false;
 
 bindEvents();
 startCrossDayRefreshWatcher();
@@ -81,6 +83,7 @@ function bindEvents() {
   elements.weeklyFeedbackForm.addEventListener("submit", handleWeeklyFeedbackSubmit);
   elements.careerNewSession.addEventListener("click", startNewCareerSession);
   elements.careerForm.addEventListener("submit", handleCareerChatSubmit);
+  elements.careerMessage.addEventListener("keydown", handleCareerComposerKeydown);
 }
 
 async function loadInitialData() {
@@ -89,15 +92,16 @@ async function loadInitialData() {
 }
 
 async function handleTodayRefresh() {
+  if (todayGoalRequestInFlight) {
+    return;
+  }
   hideAlert();
-  let soulImportPayload = null;
   try {
-    soulImportPayload = await importSoulProjectsBeforeRefresh();
-    await regenerateTodayGoal();
-    await loadHistory();
-    showSoulProjectImportNotice(soulImportPayload);
+    await regenerateTodayGoal({ rethrow: true });
   } catch (error) {
-    showAlert(errorMessage(error));
+    if (elements.alert.hidden) {
+      showAlert(errorMessage(error));
+    }
   }
 }
 
@@ -154,6 +158,9 @@ function resetTodayInputs() {
 }
 
 async function loadTodayGoal() {
+  if (!beginTodayGoalRequest()) {
+    return;
+  }
   currentGoalRecord = null;
   currentGoalRecords = [];
   currentApiDate = null;
@@ -167,10 +174,15 @@ async function loadTodayGoal() {
   } catch (error) {
     renderGoalEmpty("今日目标读取失败。");
     showAlert(errorMessage(error));
+  } finally {
+    endTodayGoalRequest();
   }
 }
 
-async function regenerateTodayGoal() {
+async function regenerateTodayGoal(options = {}) {
+  if (!beginTodayGoalRequest()) {
+    return;
+  }
   currentGoalRecord = null;
   currentGoalRecords = [];
   currentApiDate = null;
@@ -184,7 +196,26 @@ async function regenerateTodayGoal() {
   } catch (error) {
     renderGoalEmpty("今日目标重新生成失败。");
     showAlert(errorMessage(error));
+    if (options.rethrow) {
+      throw error;
+    }
+  } finally {
+    endTodayGoalRequest();
   }
+}
+
+function beginTodayGoalRequest() {
+  if (todayGoalRequestInFlight) {
+    return false;
+  }
+  todayGoalRequestInFlight = true;
+  setBusy(elements.todayRefresh, true);
+  return true;
+}
+
+function endTodayGoalRequest() {
+  todayGoalRequestInFlight = false;
+  setBusy(elements.todayRefresh, false);
 }
 
 async function loadHistory() {
@@ -1064,8 +1095,21 @@ function updateCareerSessionSelection() {
   });
 }
 
+function handleCareerComposerKeydown(event) {
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) {
+    return;
+  }
+  event.preventDefault();
+  if (!careerChatRequestInFlight) {
+    elements.careerForm.requestSubmit();
+  }
+}
+
 async function handleCareerChatSubmit(event) {
   event.preventDefault();
+  if (careerChatRequestInFlight) {
+    return;
+  }
   const message = elements.careerMessage.value.trim();
   if (!message) {
     showAlert("职业规划问题不能为空。");
@@ -1073,24 +1117,39 @@ async function handleCareerChatSubmit(event) {
     return;
   }
   const body = { message, session_id: currentCareerSessionId };
+  const optimisticUserMessage = appendCareerMessage({
+    role: "user",
+    content: message,
+  });
+  const pendingAssistantMessage = appendCareerThinkingMessage();
 
+  careerChatRequestInFlight = true;
+  elements.careerMessage.value = "";
   setBusy(elements.careerSubmit, true);
+  setBusy(elements.careerNewSession, true);
   try {
     const payload = await requestJson("/api/career-chat", {
       method: "POST",
       body,
     });
     currentCareerSessionId = payload.session_id;
-    elements.careerMessage.value = "";
+    replaceCareerMessage(pendingAssistantMessage, careerMessageFromPayload(payload));
     if (payload.career_profile_update?.soul_sync_error) {
       showAlert(`画像已保存到数据库，但 SOUL.md 同步失败：${payload.career_profile_update.soul_sync_error}`);
     }
-    await loadCareerHistory(currentCareerSessionId);
     await loadCareerSessions();
   } catch (error) {
+    removeCareerMessage(pendingAssistantMessage);
+    markCareerMessageFailed(optimisticUserMessage);
+    if (!elements.careerMessage.value.trim()) {
+      elements.careerMessage.value = message;
+    }
     showAlert(errorMessage(error));
   } finally {
+    careerChatRequestInFlight = false;
     setBusy(elements.careerSubmit, false);
+    setBusy(elements.careerNewSession, false);
+    elements.careerMessage.focus();
   }
 }
 
@@ -1116,26 +1175,171 @@ function renderCareerSessions(sessions) {
 function renderCareerMessages(messages) {
   elements.careerMessageList.replaceChildren();
   if (!messages.length) {
-    const emptyMessage = document.createElement("article");
-    emptyMessage.className = "career-message assistant";
-    emptyMessage.append(textBlock("strong", "DayPilot"));
-    emptyMessage.append(textBlock("p", "可以直接描述你的技能、性格、发展意愿或当前困惑。"));
-    elements.careerMessageList.append(emptyMessage);
+    elements.careerMessageList.append(
+      careerMessageElement({
+        role: "assistant",
+        content: "可以直接描述你的技能、性格、发展意愿或当前困惑。",
+      }, { empty: true }),
+    );
     return;
   }
   messages.forEach((message) => {
-    const item = document.createElement("article");
-    item.className = `career-message ${message.role === "assistant" ? "assistant" : "user"}`;
-    item.append(textBlock("strong", message.role === "assistant" ? "DayPilot" : "你"));
-    item.append(textBlock("p", message.content || ""));
-    if (message.role === "assistant") {
-      const recommendationsBlock = careerRecommendationsBlock(message.recommendations || []);
-      if (recommendationsBlock) {
-        item.append(recommendationsBlock);
-      }
-    }
-    elements.careerMessageList.append(item);
+    elements.careerMessageList.append(careerMessageElement(message));
   });
+  scrollCareerMessagesToBottom();
+}
+
+function appendCareerMessage(message, options = {}) {
+  if (!options.empty && elements.careerMessageList.querySelector(".career-message.empty")) {
+    elements.careerMessageList.replaceChildren();
+  }
+  const item = careerMessageElement(message, options);
+  elements.careerMessageList.append(item);
+  scrollCareerMessagesToBottom();
+  return item;
+}
+
+function appendCareerThinkingMessage() {
+  return appendCareerMessage(
+    {
+      role: "assistant",
+      content: "正在思考",
+    },
+    { pending: true },
+  );
+}
+
+function replaceCareerMessage(target, message, options = {}) {
+  const item = careerMessageElement(message, options);
+  target.replaceWith(item);
+  scrollCareerMessagesToBottom();
+  return item;
+}
+
+function removeCareerMessage(item) {
+  if (item?.parentElement) {
+    item.parentElement.removeChild(item);
+  }
+}
+
+function markCareerMessageFailed(item) {
+  item.classList.add("failed");
+  item.append(textBlock("span", "发送失败，已恢复到输入框。"));
+  scrollCareerMessagesToBottom();
+}
+
+function careerMessageFromPayload(payload) {
+  const assistant = payload.assistant_message || {};
+  if (typeof assistant === "string") {
+    return {
+      role: "assistant",
+      content: assistant,
+      recommendations: payload.recommendations || [],
+    };
+  }
+  return {
+    role: "assistant",
+    content: assistant.content || assistant.assistant_message || "",
+    recommendations: assistant.recommendations || payload.recommendations || [],
+  };
+}
+
+function careerMessageElement(message, options = {}) {
+  const role = message.role === "assistant" ? "assistant" : "user";
+  const item = document.createElement("article");
+  item.className = `career-message ${role}`;
+  if (options.empty) {
+    item.classList.add("empty");
+  }
+  item.append(textBlock("strong", role === "assistant" ? "DayPilot" : "你"));
+
+  if (options.pending) {
+    item.classList.add("pending");
+    const thinking = textBlock("p", message.content || "正在思考");
+    thinking.className = "career-thinking";
+    item.append(thinking);
+    return item;
+  }
+
+  if (role === "assistant") {
+    item.append(careerAssistantContent(message.content || ""));
+    const recommendationsBlock = careerRecommendationsBlock(message.recommendations || []);
+    if (recommendationsBlock) {
+      item.append(recommendationsBlock);
+    }
+  } else {
+    const text = textBlock("p", message.content || "");
+    text.className = "career-user-text";
+    item.append(text);
+  }
+  return item;
+}
+
+function careerAssistantContent(content) {
+  const body = document.createElement("div");
+  body.className = "career-message-body";
+  const lines = cleanCareerMessageText(content)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    body.append(textBlock("p", "-"));
+    return body;
+  }
+
+  let activeList = null;
+  let activeListType = "";
+  lines.forEach((line) => {
+    const heading = line.match(/^#{1,6}\s+(.+)$/);
+    if (heading) {
+      activeList = null;
+      activeListType = "";
+      body.append(textBlock("h4", cleanInlineMarkdown(heading[1])));
+      return;
+    }
+
+    const numbered = line.match(/^\d+[.、]\s+(.+)$/);
+    const bullet = line.match(/^[-*]\s+(.+)$/);
+    if (numbered || bullet) {
+      const listType = numbered ? "ol" : "ul";
+      if (!activeList || activeListType !== listType) {
+        activeList = document.createElement(listType);
+        activeListType = listType;
+        body.append(activeList);
+      }
+      activeList.append(textBlock("li", cleanInlineMarkdown((numbered || bullet)[1])));
+      return;
+    }
+
+    activeList = null;
+    activeListType = "";
+    body.append(textBlock("p", cleanInlineMarkdown(line)));
+  });
+  return body;
+}
+
+function cleanCareerMessageText(content) {
+  return String(content || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
+    .replace(/\s+(#{2,6})\s+/g, "\n$1 ")
+    .replace(/\s+(\d+[.、])\s+/g, "\n$1 ")
+    .replace(/\s+([-*])\s+/g, "\n$1 ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function cleanInlineMarkdown(value) {
+  return String(value || "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .trim();
+}
+
+function scrollCareerMessagesToBottom() {
   elements.careerMessageList.scrollTop = elements.careerMessageList.scrollHeight;
 }
 

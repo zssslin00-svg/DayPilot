@@ -179,8 +179,38 @@ def test_career_chat_allows_assistant_text_without_recommendation_cards() -> Non
         prompt_text = "\n".join(item["content"] for item in captured_messages)
         assert "Return 1 to 3 recommendations" not in prompt_text
         assert "recommendations may be an empty array" in prompt_text
+        assert "assistant_message should summarize direction" in prompt_text
+        assert "no Markdown heading markers" in prompt_text
         assert "saved automatically" in prompt_text
         assert "not saved automatically" not in prompt_text
+
+
+def test_career_chat_normalizer_preserves_multiline_summary_and_structured_cards() -> None:
+    output = {
+        "schema_version": "career_chat_response.v1",
+        "assistant_message": "先把方向判断压成两步。\n\n今天只做一个可验证的小实验，先产出记录，再决定要不要扩展。",
+        "recommendations": [
+            {
+                "title": "Mini Agent 记忆实验",
+                "why_it_fits": "它能验证你对 Agent 记忆和检索的兴趣，同时范围足够小。",
+                "skills_to_build": ["Agent 记忆设计", "检索评估"],
+                "estimated_time": "45 分钟完成第一版记录",
+                "deliverable": "一份包含输入、输出和观察结果的实验记录",
+                "first_step": "先写 3 条规则和 3 个查询样例。",
+                "risks": "容易扩成完整系统，需要只保留最小验证。",
+                "not_now_reason": "如果今天精力不足，先记录候选，不做工程化。",
+            }
+        ],
+        "profile_update_suggestions": [],
+    }
+
+    normalized = career_chat_module.normalize_career_chat_response(output)
+    career_chat_module.validate_career_chat_response(normalized)
+
+    assert "\n\n" in normalized["assistant_message"]
+    assert "Mini Agent 记忆实验" not in normalized["assistant_message"]
+    assert normalized["recommendations"][0]["title"] == "Mini Agent 记忆实验"
+    assert normalized["recommendations"][0]["deliverable"]
 
 
 def test_legacy_profile_suggestion_apply_updates_structured_profile_and_soul() -> None:
@@ -322,6 +352,7 @@ def test_career_chat_with_missing_soul_and_empty_profile_still_gives_conservativ
 def main() -> None:
     test_career_chat_saves_chat_and_auto_applies_suggestions_without_touching_goal_loop()
     test_career_chat_allows_assistant_text_without_recommendation_cards()
+    test_career_chat_normalizer_preserves_multiline_summary_and_structured_cards()
     test_legacy_profile_suggestion_apply_updates_structured_profile_and_soul()
     test_legacy_profile_suggestion_dismiss_does_not_update_profile()
     test_career_chat_with_missing_soul_and_empty_profile_still_gives_conservative_advice()

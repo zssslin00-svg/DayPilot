@@ -197,14 +197,16 @@
 
               <form class="career-form career-composer" id="career-chat-form">
                 <label class="career-composer-field">
-                  <span class="visually-hidden">想讨论的职业问题</span>
+                  <span class="career-composer-title">直接说你在想什么</span>
+                  <span class="career-composer-hint" id="career-composer-hint">
+                    写下技能、方向或时间约束，DayPilot 会帮你压成可交付的小项目。
+                  </span>
                   <textarea
                     id="career-chat-message"
                     name="message"
                     rows="5"
                     aria-label="想讨论的职业问题"
-                    placeholder="直接说你在想什么，例如：我会 Python 和一点机器学习，想往 AI Agent 方向发展，但精力有限，今天只有 45 分钟，应该做什么项目？"
-                    required
+                    aria-describedby="career-composer-hint"
                   ></textarea>
                 </label>
                 <button class="text-button" id="career-chat-submit" type="submit">发送</button>

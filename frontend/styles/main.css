@@ -820,31 +820,111 @@ button:focus-visible {
 .career-message-list {
   display: grid;
   align-content: start;
-  gap: 10px;
+  gap: 12px;
   min-height: 0;
   overflow: auto;
-  padding: 2px 4px 2px 0;
+  padding: 2px 6px 2px 0;
 }
 
 .career-message {
   display: grid;
-  gap: 5px;
+  gap: 8px;
   justify-self: start;
   width: fit-content;
-  max-width: min(760px, 92%);
-  padding: 11px 13px;
+  max-width: min(760px, 88%);
+  padding: 12px 14px;
   border-radius: 8px;
-  background: rgba(255, 250, 239, 0.62);
+  background: rgba(255, 250, 239, 0.72);
+  line-height: 1.62;
+  overflow-wrap: anywhere;
 }
 
 .career-message.user {
   justify-self: end;
   max-width: min(620px, 86%);
-  background: rgba(47, 111, 159, 0.09);
+  background: rgba(47, 111, 159, 0.12);
+  color: #25323d;
 }
 
-.career-message p {
+.career-message > strong {
+  color: var(--blue);
+  font-size: 0.92rem;
+  line-height: 1.25;
+}
+
+.career-message.user > strong {
+  justify-self: end;
+}
+
+.career-message.failed {
+  border: 1px solid rgba(138, 63, 59, 0.28);
+  background: #fff3ed;
+}
+
+.career-message.failed span {
+  color: #7d2d2d;
+  font-size: 0.84rem;
+}
+
+.career-message.pending {
+  color: var(--soft-ink);
+}
+
+.career-message p,
+.career-message-body h4,
+.career-message-body ul,
+.career-message-body ol {
   margin: 0;
+}
+
+.career-user-text {
+  white-space: pre-wrap;
+}
+
+.career-message-body {
+  display: grid;
+  gap: 9px;
+}
+
+.career-message-body h4 {
+  color: #2d3035;
+  font-size: 0.98rem;
+  line-height: 1.45;
+}
+
+.career-message-body ul,
+.career-message-body ol {
+  padding-left: 1.2rem;
+}
+
+.career-message-body li + li {
+  margin-top: 4px;
+}
+
+.career-thinking::after {
+  display: inline-block;
+  width: 1.4em;
+  content: "";
+  animation: career-thinking-dots 1.2s steps(4, end) infinite;
+}
+
+@keyframes career-thinking-dots {
+  0% {
+    content: "";
+  }
+
+  25% {
+    content: ".";
+  }
+
+  50% {
+    content: "..";
+  }
+
+  75%,
+  100% {
+    content: "...";
+  }
 }
 
 .career-form {
@@ -863,12 +943,26 @@ button:focus-visible {
 
 .career-composer-field {
   display: grid;
+  gap: 6px;
   min-width: 0;
 }
 
+.career-composer-title {
+  color: var(--blue);
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.career-composer-hint {
+  color: var(--soft-ink);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
 .career-composer textarea {
-  min-height: 124px;
-  max-height: 240px;
+  min-height: 92px;
+  max-height: 180px;
   resize: vertical;
   background: rgba(255, 253, 246, 0.82);
 }

@@ -150,7 +150,7 @@ def send_career_chat_message(
     today: date | None = None,
 ) -> CareerChatResult:
     request_body = request_body or {}
-    message = _compact_text(request_body.get("message"), 2400)
+    message = _compact_text(request_body.get("message"), 2400, preserve_lines=True)
     if not message:
         raise CareerChatValidationError("message is required.")
     available_minutes = _optional_positive_int(request_body.get("available_minutes"), maximum=720)
@@ -464,7 +464,7 @@ def normalize_career_chat_response(output: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("career_chat_output_not_object")
     recommendations = _normalize_optional_recommendations(output.get("recommendations"))
     suggestions = _normalize_profile_update_suggestions(output.get("profile_update_suggestions"))
-    message = _compact_text(output.get("assistant_message"), 1600)
+    message = _compact_text(output.get("assistant_message"), 1600, preserve_lines=True)
     if len(message) < 8:
         if recommendations:
             titles = "；".join(item["title"] for item in recommendations)
@@ -554,6 +554,8 @@ You are DayPilot's private career development planning assistant.
 Return exactly one valid JSON object matching career_chat_response.v1.
 You help the single local user decide how to use spare time for career growth based on personality, skills, development intentions, constraints, and project history.
 Assistant text may provide clarifying questions, direction analysis, risk warnings, next steps, or project ideas.
+Keep assistant_message readable and brief: use 2 to 4 short Chinese paragraphs, no Markdown heading markers, and no long numbered project-card dump.
+Put concrete project or experiment options in recommendations instead of repeating full project cards inside assistant_message.
 Do not create, update, or claim to create DayPilot projects, daily goals, check-ins, or weekly reports.
 Do not browse the web or invent market data. Make advice from the provided local context only.
 Structured recommendations are optional. When you include them, each must be a concrete project or experiment with a visible deliverable.
@@ -588,6 +590,7 @@ Use concise Chinese for user-facing text.
         ],
         "rules": [
             "recommendations may be an empty array when assistant_message is the better response.",
+            "assistant_message should summarize direction and next-step reasoning; detailed project choices belong in recommendations.",
             "Use structured recommendations only when concrete project cards help the user decide what to do next.",
             "Each structured recommendation must name a deliverable.",
             "profile_update_suggestions are saved automatically, so include only stable and evidence-backed profile facts.",
@@ -979,8 +982,33 @@ def _with_fallback(value: Any, fallback: str, max_chars: int) -> str:
     return text if len(text) >= 2 else fallback[:max_chars]
 
 
-def _compact_text(value: Any, max_chars: int = 2400) -> str:
-    return " ".join(str(value or "").split()).strip()[:max_chars]
+def _compact_text(value: Any, max_chars: int = 2400, *, preserve_lines: bool = False) -> str:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not preserve_lines:
+        return " ".join(text.split()).strip()[:max_chars]
+
+    paragraphs: list[str] = []
+    for block in re.split(r"\n{2,}", text):
+        lines = [" ".join(line.split()) for line in block.split("\n")]
+        paragraph = "\n".join(line for line in lines if line).strip()
+        if paragraph:
+            paragraphs.append(paragraph)
+    return _trim_text_at_boundary("\n\n".join(paragraphs), max_chars)
+
+
+def _trim_text_at_boundary(value: str, max_chars: int) -> str:
+    text = value.strip()
+    if len(text) <= max_chars:
+        return text
+
+    truncated = text[:max_chars].rstrip()
+    minimum_cut = max(8, int(max_chars * 0.65))
+    for separator in ("\n\n", "\n", "。", "！", "？", ".", "；", ";", "，", ","):
+        index = truncated.rfind(separator)
+        if index >= minimum_cut:
+            end = index if separator.startswith("\n") else index + len(separator)
+            return truncated[:end].rstrip()
+    return truncated
 
 
 def _merge_unique(existing: list[str], additions: list[str]) -> list[str]:
