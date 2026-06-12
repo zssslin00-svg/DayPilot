@@ -190,12 +190,12 @@ def get_or_generate_today_goal(
     soul_path: str | Path | None = None,
 ) -> TodayGoalResult:
     goal_date = today.isoformat()
-    sync_source_goal_id: int | None = None
     connection = initialize_database(db_path)
     try:
         with connection:
             _ensure_default_profile(connection)
             ensure_projects_seeded(connection)
+            _archive_duplicate_open_goals_for_date(connection, goal_date)
             active_projects = repo.list_projects(connection)
             goals: list[dict[str, Any]] = []
             created_count = 0
@@ -203,7 +203,7 @@ def get_or_generate_today_goal(
 
             for project in active_projects:
                 project_id = int(project["id"])
-                existing = repo.get_goal_with_active_version_by_date_and_project(
+                existing = _current_goal_record_for_project_date(
                     connection,
                     goal_date,
                     project_id,
@@ -278,16 +278,15 @@ def get_or_generate_today_goal(
                     prompt_version=context["llm_metadata"]["prompt_version"],
                 )
                 _mark_selected_focus_carried(connection, context, daily_goal_id, goal_output)
-                if update_project_today_goal_from_output(
+                update_project_today_goal_from_output(
                     connection,
                     project_id,
                     goal_output,
                     source="today_goal_generation",
                     daily_goal_id=daily_goal_id,
-                ):
-                    sync_source_goal_id = sync_source_goal_id or daily_goal_id
+                )
 
-                generated = repo.get_goal_with_active_version_by_date_and_project(
+                generated = _current_goal_record_for_project_date(
                     connection,
                     goal_date,
                     project_id,
@@ -298,8 +297,6 @@ def get_or_generate_today_goal(
 
             _append_unchecked_existing_goals(connection, goal_date, goals)
 
-        if sync_source_goal_id is not None:
-            sync_current_projects_to_soul_if_requested(db_path, soul_path, sync_source_goal_id)
         return TodayGoalResult(
             goals=goals,
             active_project_count=len(active_projects),
@@ -321,19 +318,19 @@ def regenerate_today_goal(
     """Force a fresh daily goal version for every active project."""
 
     goal_date = today.isoformat()
-    sync_source_goal_id: int | None = None
     connection = initialize_database(db_path)
     try:
         with connection:
             _ensure_default_profile(connection)
             ensure_projects_seeded(connection)
+            _archive_duplicate_open_goals_for_date(connection, goal_date)
             active_projects = repo.list_projects(connection)
             goals: list[dict[str, Any]] = []
             regenerated_count = 0
 
             for project in active_projects:
                 project_id = int(project["id"])
-                existing = repo.get_goal_with_active_version_by_date_and_project(
+                existing = _current_goal_record_for_project_date(
                     connection,
                     goal_date,
                     project_id,
@@ -387,16 +384,15 @@ def regenerate_today_goal(
                     prompt_version=context["llm_metadata"]["prompt_version"],
                 )
                 _mark_selected_focus_carried(connection, context, daily_goal_id, goal_output)
-                if update_project_today_goal_from_output(
+                update_project_today_goal_from_output(
                     connection,
                     project_id,
                     goal_output,
                     source="today_goal_regeneration",
                     daily_goal_id=daily_goal_id,
-                ):
-                    sync_source_goal_id = sync_source_goal_id or daily_goal_id
+                )
 
-                generated = repo.get_goal_with_active_version_by_date_and_project(
+                generated = _current_goal_record_for_project_date(
                     connection,
                     goal_date,
                     project_id,
@@ -408,8 +404,6 @@ def regenerate_today_goal(
 
             _append_unchecked_existing_goals(connection, goal_date, goals)
 
-        if sync_source_goal_id is not None:
-            sync_current_projects_to_soul_if_requested(db_path, soul_path, sync_source_goal_id)
         return TodayGoalResult(
             goals=goals,
             active_project_count=len(active_projects),
@@ -442,11 +436,12 @@ def refresh_today_goal_for_project(
         with connection:
             _ensure_default_profile(connection)
             ensure_projects_seeded(connection)
+            _archive_duplicate_open_goals_for_date(connection, goal_date)
             project = repo.get_project(connection, int(project_id))
             if project is None or str(project.get("status") or "") != "active":
                 return ProjectTodayGoalRefreshResult(status="skipped_inactive", goal=None, created_count=0)
 
-            existing = repo.get_goal_with_active_version_by_date_and_project(
+            existing = _current_goal_record_for_project_date(
                 connection,
                 goal_date,
                 int(project["id"]),
@@ -508,7 +503,7 @@ def refresh_today_goal_for_project(
                 prompt_version=context["llm_metadata"]["prompt_version"],
             )
             _mark_selected_focus_carried(connection, context, daily_goal_id, goal_output)
-            should_sync_soul = update_project_today_goal_from_output(
+            update_project_today_goal_from_output(
                 connection,
                 int(project["id"]),
                 goal_output,
@@ -516,7 +511,7 @@ def refresh_today_goal_for_project(
                 daily_goal_id=daily_goal_id,
             )
 
-            generated = repo.get_goal_with_active_version_by_date_and_project(
+            generated = _current_goal_record_for_project_date(
                 connection,
                 goal_date,
                 int(project["id"]),
@@ -524,8 +519,6 @@ def refresh_today_goal_for_project(
             if generated is None or generated.get("active_version") is None:
                 raise DailyGoalGenerationError("Generated goal was not persisted.")
 
-        if should_sync_soul:
-            sync_current_projects_to_soul_if_requested(db_path, soul_path, daily_goal_id)
         return ProjectTodayGoalRefreshResult(
             status="refreshed" if had_active_goal else "created",
             goal=_attach_goal_output(generated),
@@ -727,33 +720,6 @@ def update_project_today_goal_from_output(
     return True
 
 
-def sync_current_projects_to_soul_if_requested(
-    db_path: str | Path,
-    soul_path: str | Path | None,
-    source_daily_goal_id: int,
-) -> None:
-    if soul_path is None:
-        return
-    try:
-        from backend.services.project_lifecycle_service import sync_current_projects_to_soul
-
-        sync_current_projects_to_soul(db_path, soul_path=soul_path)
-    except Exception as exc:  # noqa: BLE001 - goal persistence is already complete
-        from backend.services.soul_sync_service import enqueue_soul_sync_retry
-
-        enqueue_soul_sync_retry(
-            db_path,
-            job_type="project_lifecycle",
-            source_table="daily_goals",
-            source_id=source_daily_goal_id,
-            payload={
-                "daily_goal_id": source_daily_goal_id,
-                "action": "sync_today_goal_to_soul",
-            },
-            error=_safe_error(exc),
-        )
-
-
 def _context_snapshot(context: dict[str, Any], goal_output: dict[str, Any]) -> dict[str, Any]:
     llm_metadata = context.get("llm_metadata") or {}
     return {
@@ -850,15 +816,108 @@ def _append_unchecked_existing_goals(
         for record in goals
         if record.get("daily_goal") and record["daily_goal"].get("id") is not None
     }
+    seen_project_ids = {
+        int(record["daily_goal"]["project_id"])
+        for record in goals
+        if record.get("daily_goal") and record["daily_goal"].get("project_id") is not None
+    }
     for record in repo.list_goal_records_by_date(connection, goal_date):
         daily_goal = record.get("daily_goal") or {}
+        if str(daily_goal.get("status") or "active") != "active":
+            continue
         daily_goal_id = daily_goal.get("id")
         if daily_goal_id is None or int(daily_goal_id) in seen_goal_ids:
+            continue
+        project_id = daily_goal.get("project_id")
+        if project_id is None or int(project_id) in seen_project_ids:
+            continue
+        project = record.get("project") or {}
+        if str(project.get("status") or "active") != "active":
             continue
         if record.get("active_version") is None or record.get("daily_checkin") is not None:
             continue
         goals.append(_attach_goal_output(record))
         seen_goal_ids.add(int(daily_goal_id))
+        seen_project_ids.add(int(project_id))
+
+
+def _current_goal_record_for_project_date(
+    connection: sqlite3.Connection,
+    goal_date: str,
+    project_id: int,
+) -> dict[str, Any] | None:
+    candidates: list[dict[str, Any]] = []
+    for record in repo.list_goal_records_by_date(connection, goal_date):
+        daily_goal = record.get("daily_goal") or {}
+        if int(daily_goal.get("project_id") or 0) != int(project_id):
+            continue
+        if str(daily_goal.get("status") or "active") not in {"active", "checked_in"}:
+            continue
+        if record.get("active_version") is None:
+            continue
+        project = record.get("project") or {}
+        if str(project.get("status") or "active") != "active":
+            continue
+        candidates.append(record)
+    if not candidates:
+        return None
+    return sorted(candidates, key=_current_goal_record_rank)[0]
+
+
+def _current_goal_record_rank(record: dict[str, Any]) -> tuple[int, int, int, int]:
+    daily_goal = record.get("daily_goal") or {}
+    checked = record.get("daily_checkin") is not None or str(daily_goal.get("status") or "") == "checked_in"
+    goal_source = str(daily_goal.get("goal_source") or "")
+    source_rank = 0 if goal_source == "daily_planning" else 1
+    return (
+        1 if checked else 0,
+        source_rank,
+        int(daily_goal.get("display_order") or 0),
+        int(daily_goal.get("id") or 0),
+    )
+
+
+def _archive_duplicate_open_goals_for_date(connection: sqlite3.Connection, goal_date: str) -> int:
+    by_project: dict[int, list[dict[str, Any]]] = {}
+    archived_count = 0
+    for record in repo.list_goal_records_by_date(connection, goal_date):
+        daily_goal = record.get("daily_goal") or {}
+        if str(daily_goal.get("status") or "active") != "active":
+            continue
+        if record.get("active_version") is None or record.get("daily_checkin") is not None:
+            continue
+        project = record.get("project") or {}
+        if str(project.get("status") or "active") != "active":
+            repo.update_daily_goal(connection, int(daily_goal["id"]), status="archived")
+            archived_count += 1
+            continue
+        project_id = daily_goal.get("project_id")
+        if project_id is None:
+            continue
+        by_project.setdefault(int(project_id), []).append(record)
+
+    for records in by_project.values():
+        if len(records) <= 1:
+            continue
+        keep = sorted(records, key=_current_goal_record_rank)[0]
+        keep_id = int(keep["daily_goal"]["id"])
+        for record in records:
+            daily_goal_id = int(record["daily_goal"]["id"])
+            if daily_goal_id == keep_id:
+                continue
+            repo.update_daily_goal(connection, daily_goal_id, status="archived")
+            _retarget_career_actions(connection, old_goal_id=daily_goal_id, new_goal_id=keep_id)
+            archived_count += 1
+    return archived_count
+
+
+def _retarget_career_actions(connection: sqlite3.Connection, *, old_goal_id: int, new_goal_id: int) -> None:
+    rows = connection.execute(
+        "SELECT id FROM career_recommendation_actions WHERE daily_goal_id = ?",
+        (old_goal_id,),
+    ).fetchall()
+    for row in rows:
+        repo.update_career_recommendation_action(connection, int(row["id"]), daily_goal_id=new_goal_id)
 
 
 def _latest_unfinished_goal_record(records: list[dict[str, Any]]) -> dict[str, Any] | None:

@@ -271,38 +271,6 @@ def _apply_output(
     soul_backup_path: Path | None = None
     soul_sync_error: str | None = None
     soul_sync_retry_job_id: int | None = None
-    if applied:
-        try:
-            soul_backup_path = _sync_weekly_report_preferences_to_soul(db_path, soul_path=soul_path)
-            if event_id is not None:
-                connection = initialize_database(db_path)
-                try:
-                    with connection:
-                        repo.update_profile_memory_event(
-                            connection,
-                            event_id,
-                            soul_backup_path=str(soul_backup_path),
-                        )
-                finally:
-                    connection.close()
-        except Exception as exc:  # noqa: BLE001 - DB is the source of truth
-            soul_sync_error = _safe_error(exc)
-            from backend.services.soul_sync_service import enqueue_soul_sync_retry
-
-            soul_sync_retry_job_id = enqueue_soul_sync_retry(
-                db_path,
-                job_type="profile_memory",
-                source_table="profile_memory_events",
-                source_id=event_id,
-                payload={
-                    "profile_id": 1,
-                    "profile_memory_event_id": event_id,
-                    "memory_type": "weekly_report_preferences",
-                },
-                error=soul_sync_error,
-            )
-            status = MEMORY_STATUS_QUEUED
-
     return {
         "status": status,
         "applied_items_count": applied_items_count,
@@ -315,6 +283,7 @@ def _apply_output(
         "soul_sync_queued": soul_sync_retry_job_id is not None,
         "soul_sync_retry_job_id": soul_sync_retry_job_id,
         "soul_sync_error": soul_sync_error,
+        "soul_sync_disabled_reason": "weekly_report_memory_no_longer_writes_soul",
     }
 
 

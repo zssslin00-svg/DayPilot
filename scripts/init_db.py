@@ -47,6 +47,7 @@ def main() -> None:
                 'career_chat_sessions',
                 'career_chat_messages',
                 'career_profile_update_suggestions',
+                'career_chat_memory_summaries',
                 'career_recommendation_actions'
               )
             """
@@ -55,7 +56,7 @@ def main() -> None:
         connection.close()
 
     print(f"Initialized DayPilot database at {db_path}")
-    print(f"Core tables present: {table_count}/16")
+    print(f"Core tables present: {table_count}/17")
 
 
 if __name__ == "__main__":

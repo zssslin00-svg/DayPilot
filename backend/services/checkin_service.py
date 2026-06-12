@@ -110,6 +110,7 @@ def save_daily_checkin(
                 db_path,
                 str(checkin["week_id"]),
                 checkin_date,
+                soul_path=soul_path,
             )
 
         return CheckinResult(
@@ -136,22 +137,29 @@ def _update_project_progress_after_checkin(
     *,
     soul_path: str | Path,
 ) -> dict[str, Any]:
-    from backend.services.project_progress_service import update_project_progress_for_checkin
+    from backend.services.soul_frontend_sync_service import sync_checkin_to_soul
 
     try:
-        result = update_project_progress_for_checkin(db_path, checkin_id, soul_path=soul_path)
+        result = sync_checkin_to_soul(db_path, checkin_id, soul_path=soul_path)
+        if result.get("status") != "failed":
+            return {
+                **result,
+                "status": "updated",
+            }
+        return result
     except Exception as exc:  # noqa: BLE001 - check-in save must not be rolled back
         return {
             "status": "failed",
             "reason": str(exc),
         }
-    return result.payload
 
 
 def _refresh_weekly_report_after_checkin_edit(
     db_path: str | Path,
     week_id: str,
     checkin_date: date,
+    *,
+    soul_path: str | Path,
 ) -> dict[str, Any]:
     from backend.services.weekly_report_service import generate_weekly_report
 
@@ -162,6 +170,7 @@ def _refresh_weekly_report_after_checkin_edit(
             default_date=checkin_date,
             revision_source="checkin_refresh",
             revision_reason=f"Check-in edited for {checkin_date.isoformat()}.",
+            soul_path=soul_path,
         )
     except Exception as exc:  # noqa: BLE001 - check-in save must not be rolled back by report refresh
         return {

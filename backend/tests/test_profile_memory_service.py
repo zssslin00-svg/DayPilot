@@ -159,6 +159,7 @@ def test_deepseek_profile_memory_updates_db_soul_and_event_without_confidence_ga
         root = Path(temp_dir)
         db_path = root / "profile-memory.sqlite3"
         soul_path = _soul_file(root)
+        before_soul = soul_path.read_text(encoding="utf-8")
         feedback_id = _seed_feedback(
             db_path,
             "以后不要给我太抽象的目标，我更喜欢能留下文件、代码或笔记的目标。",
@@ -188,7 +189,9 @@ def test_deepseek_profile_memory_updates_db_soul_and_event_without_confidence_ga
 
         assert result["status"] == "applied"
         assert result["applied_items_count"] == 3
-        assert result["soul_synced"] is True
+        assert result["soul_synced"] is False
+        assert result["soul_sync_queued"] is False
+        assert result["soul_sync_disabled_reason"] == "profile_memory_no_longer_writes_soul"
 
         connection = initialize_database(db_path)
         try:
@@ -205,12 +208,7 @@ def test_deepseek_profile_memory_updates_db_soul_and_event_without_confidence_ga
         assert events[0]["applied"] == 1
         assert events[0]["confidence"] == 0.05
 
-        soul_text = soul_path.read_text(encoding="utf-8")
-        assert "旧项目段落必须保留。" in soul_text
-        assert "长期方向原文。" in soul_text
-        assert "能留下文件、代码、笔记或决策记录的目标。" in soul_text
-        assert "不要给太抽象的目标。" in soul_text
-        assert "时间不足时优先缩小范围，保留可交付结果。" in soul_text
+        assert soul_path.read_text(encoding="utf-8") == before_soul
 
 
 def test_one_time_time_limit_is_skipped_and_not_written_to_soul() -> None:
@@ -249,6 +247,7 @@ def test_mock_fallback_applies_explicit_stable_phrases() -> None:
         root = Path(temp_dir)
         db_path = root / "profile-memory-fallback.sqlite3"
         soul_path = _soul_file(root)
+        before_soul = soul_path.read_text(encoding="utf-8")
         feedback_id = _seed_feedback(
             db_path,
             "以后不要给我太抽象的目标。我更喜欢能留下文件或代码的目标。",
@@ -264,9 +263,17 @@ def test_mock_fallback_applies_explicit_stable_phrases() -> None:
 
         assert result["status"] == "applied"
         assert result["applied_items_count"] == 2
-        soul_text = soul_path.read_text(encoding="utf-8")
-        assert "能留下文件或代码的目标" in soul_text
-        assert "不要给我太抽象的目标" in soul_text
+        assert result["soul_synced"] is False
+        assert result["soul_sync_queued"] is False
+        assert soul_path.read_text(encoding="utf-8") == before_soul
+
+        connection = initialize_database(db_path)
+        try:
+            profile = repo.get_user_profile(connection)
+        finally:
+            connection.close()
+        assert "能留下文件或代码的目标" in profile["goal_preferences"]["stable_preferences"]
+        assert "不要给我太抽象的目标" in profile["goal_preferences"]["avoid_patterns"]
 
 
 def test_invalid_deepseek_output_and_unparseable_fallback_returns_failed_without_mutation() -> None:
@@ -310,7 +317,7 @@ def main() -> None:
     test_one_time_time_limit_is_skipped_and_not_written_to_soul()
     test_mock_fallback_applies_explicit_stable_phrases()
     test_invalid_deepseek_output_and_unparseable_fallback_returns_failed_without_mutation()
-    print("PASS: profile memory extraction, fallback, SOUL sync, and failure handling verified")
+    print("PASS: profile memory extraction, fallback, disabled SOUL writes, and failure handling verified")
 
 
 if __name__ == "__main__":

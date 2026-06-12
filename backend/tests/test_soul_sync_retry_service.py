@@ -15,7 +15,7 @@ from backend.config.settings import DayPilotSettings  # noqa: E402
 from backend.repositories import daypilot_repository as repo  # noqa: E402
 from backend.repositories.database import initialize_database  # noqa: E402
 from backend.services.profile_memory_service import apply_profile_memory_from_feedback  # noqa: E402
-from backend.services.soul_sync_service import get_soul_sync_status, retry_soul_sync_jobs  # noqa: E402
+from backend.services.soul_sync_service import enqueue_soul_sync_retry, get_soul_sync_status, retry_soul_sync_jobs  # noqa: E402
 
 
 class FakeResponse:
@@ -145,7 +145,7 @@ def _seed_feedback(db_path: Path, raw_message: str) -> int:
         connection.close()
 
 
-def test_profile_memory_soul_failure_is_queued_and_retry_succeeds() -> None:
+def test_profile_memory_no_longer_queues_soul_retry() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         db_path = root / "soul-retry.sqlite3"
@@ -177,7 +177,8 @@ def test_profile_memory_soul_failure_is_queued_and_retry_succeeds() -> None:
 
         assert result["status"] == "applied"
         assert result["soul_synced"] is False
-        assert result["soul_sync_queued"] is True
+        assert result["soul_sync_queued"] is False
+        assert result["soul_sync_disabled_reason"] == "profile_memory_no_longer_writes_soul"
 
         connection = initialize_database(db_path)
         try:
@@ -187,21 +188,66 @@ def test_profile_memory_soul_failure_is_queued_and_retry_succeeds() -> None:
             connection.close()
 
         assert "Prefer goals with concrete artifacts." in profile["goal_preferences"]["stable_preferences"]
-        assert len(jobs) == 1
-        assert jobs[0]["job_type"] == "profile_memory"
-        assert jobs[0]["status"] == "pending"
+        assert jobs == []
 
-        _valid_soul_file(soul_path)
         retry_payload = retry_soul_sync_jobs(db_path, soul_path=soul_path).payload
+        assert retry_payload["retried"] == 0
+        assert get_soul_sync_status(db_path)["counts"]["succeeded"] == 0
+        assert "Prefer goals with concrete artifacts." not in soul_path.read_text(encoding="utf-8")
+
+
+def test_legacy_soul_retry_jobs_are_disabled_without_writing_soul() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        db_path = root / "legacy-soul-retry.sqlite3"
+        soul_path = root / "SOUL.md"
+        original_soul = "# DayPilot SOUL\n\n## 当前项目\n\n1. Keep this line.\n"
+        soul_path.write_text(original_soul, encoding="utf-8")
+        connection = initialize_database(db_path)
+        try:
+            with connection:
+                repo.create_soul_sync_retry_job(
+                    connection,
+                    job_type="profile_memory",
+                    status="pending",
+                    source_table="profile_memory_events",
+                    source_id=1,
+                    payload={"profile_id": 1},
+                    last_error="legacy write failed",
+                )
+        finally:
+            connection.close()
+
+        retry_payload = retry_soul_sync_jobs(db_path, soul_path=soul_path).payload
+
         assert retry_payload["retried"] == 1
-        assert retry_payload["results"][0]["status"] == "succeeded"
+        assert retry_payload["results"][0]["status"] == "skipped"
+        assert retry_payload["results"][0]["reason"] == "soul_sync_retry_disabled"
+        assert soul_path.read_text(encoding="utf-8") == original_soul
         assert get_soul_sync_status(db_path)["counts"]["succeeded"] == 1
-        assert "Prefer goals with concrete artifacts." in soul_path.read_text(encoding="utf-8")
+
+
+def test_enqueue_soul_sync_retry_is_compatibility_noop() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = Path(temp_dir) / "noop-soul-retry.sqlite3"
+        retry_id = enqueue_soul_sync_retry(
+            db_path,
+            job_type="profile_memory",
+            source_table="profile_memory_events",
+            source_id=1,
+            payload={"profile_id": 1},
+            error="legacy failure",
+        )
+
+        assert retry_id == 0
+        assert get_soul_sync_status(db_path)["counts"]["pending"] == 0
 
 
 def main() -> None:
-    test_profile_memory_soul_failure_is_queued_and_retry_succeeds()
-    print("PASS: SOUL sync failures are queued and can be retried")
+    test_profile_memory_no_longer_queues_soul_retry()
+    test_legacy_soul_retry_jobs_are_disabled_without_writing_soul()
+    test_enqueue_soul_sync_retry_is_compatibility_noop()
+    print("PASS: disabled SOUL memory writes do not enqueue or execute retry jobs")
 
 
 if __name__ == "__main__":

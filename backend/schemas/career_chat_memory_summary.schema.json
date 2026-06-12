@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://daypilot.local/schemas/career_chat_memory_summary.schema.json",
+  "title": "DayPilotCareerChatMemorySummary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "progress",
+    "files",
+    "todo",
+    "context",
+    "source_message_count"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "career_chat_memory_summary.v1"
+    },
+    "progress": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "string",
+        "maxLength": 180
+      }
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "string",
+        "maxLength": 180
+      }
+    },
+    "todo": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "string",
+        "maxLength": 180
+      }
+    },
+    "context": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "string",
+        "maxLength": 220
+      }
+    },
+    "source_message_count": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

@@ -30,6 +30,7 @@ CORE_TABLES = {
     "career_chat_sessions",
     "career_chat_messages",
     "career_profile_update_suggestions",
+    "career_chat_memory_summaries",
     "career_recommendation_actions",
 }
 
@@ -240,6 +241,27 @@ def test_schema_and_repository_crud() -> None:
                     status="dismissed",
                 )
                 assert repo.list_pending_career_profile_update_suggestions(connection) == []
+                summary = repo.upsert_career_chat_memory_summary(
+                    connection,
+                    session_id=career_session_id,
+                    summary_payload={
+                        "schema_version": "career_chat_memory_summary.v1",
+                        "progress": ["Picked an Agent eval direction."],
+                        "files": ["backend/services/career_chat_service.py"],
+                        "todo": ["Keep the next step small."],
+                        "context": ["User wants AI Agent career growth."],
+                        "source_message_count": 2,
+                    },
+                    covered_through_message_id=assistant_message_id,
+                    source_message_ids=[user_message_id, assistant_message_id],
+                    llm_metadata={"provider": "mock"},
+                )
+                assert summary["summary_payload"]["progress"] == ["Picked an Agent eval direction."]
+                assert summary["source_message_ids"] == [user_message_id, assistant_message_id]
+                assert repo.get_career_chat_memory_summary_by_session(
+                    connection,
+                    career_session_id,
+                )["covered_through_message_id"] == assistant_message_id
                 action_id = repo.create_career_recommendation_action(
                     connection,
                     session_id=career_session_id,

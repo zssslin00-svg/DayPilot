@@ -11,6 +11,7 @@ from typing import Any
 from backend.repositories import daypilot_repository as repo
 from backend.repositories.database import DEFAULT_DB_PATH, initialize_database
 from backend.services.soul_context import SOUL_PATH
+from backend.services.soul_frontend_sync_service import sync_career_recommendation_to_soul
 from backend.services.today_goal_service import goal_output_from_record
 from backend.services.workday_policy import is_workday
 
@@ -107,10 +108,13 @@ def adopt_career_recommendation(
             action = repo.get_career_recommendation_action(connection, action_id)
             project = repo.get_project(connection, int(project["id"]))
 
-        soul_sync = _sync_soul_if_project_changed(
+        soul_sync = sync_career_recommendation_to_soul(
             db_path,
+            action_id=int(action["id"]),
+            allow_current_project_append=project_resolution["action"] in {"new_project_goal", "restored_project_goal"}
+            and bool(project_resolution["project_changed"]),
+            today=today,
             soul_path=soul_path,
-            project_changed=project_resolution["project_changed"],
         )
         return CareerRecommendationAdoptionResult(
             _adoption_payload(
@@ -265,7 +269,8 @@ def _resolve_bound_project(
         return None
 
     project_name = binding["project_name"]
-    active_by_name = {str(project.get("name") or "").strip(): project for project in active_projects}
+    active_by_name = {_project_name_key(project.get("name")): project for project in active_projects}
+    project_key = _project_name_key(project_name)
     if binding["kind"] not in {"existing_project", "new_project"}:
         return {
             "status": "needs_project_choice",
@@ -273,7 +278,7 @@ def _resolve_bound_project(
             "reason": "invalid_project_binding",
         }
     if binding["kind"] == "existing_project":
-        project = active_by_name.get(project_name)
+        project = active_by_name.get(project_key)
         if project is not None:
             return {
                 "status": "resolved",
@@ -288,11 +293,14 @@ def _resolve_bound_project(
             "reason": "invalid_bound_existing_project_name",
         }
 
-    if project_name in active_by_name:
+    if project_key in active_by_name:
+        project = active_by_name[project_key]
         return {
-            "status": "needs_project_choice",
-            "candidates": [_project_candidate(active_by_name[project_name])],
-            "reason": "bound_new_project_collides_with_active_project",
+            "status": "resolved",
+            "project": project,
+            "action": "existing_project_goal",
+            "project_changed": False,
+            "reason": "bound_new_project_reused_matching_active_project",
         }
     return _create_or_restore_project(connection, recommendation)
 
@@ -327,7 +335,7 @@ def _project_name_for_new_project(recommendation: dict[str, Any]) -> str:
 
 def _create_or_restore_project(connection, recommendation: dict[str, Any]) -> dict[str, Any]:
     project_name = _project_name_for_new_project(recommendation)
-    existing = repo.get_project_by_name(connection, project_name)
+    existing = _find_project_by_name_key(connection, project_name, include_archived=True)
     summary = _compact_text(recommendation.get("why_it_fits") or "来自职业规划建议，适合作为可交付成长实验。", 180)
     target_goal = _compact_text(recommendation.get("deliverable") or project_name, 160)
     planning_guidance = _compact_text(
@@ -405,34 +413,54 @@ def _create_recommendation_goal(
 ) -> dict[str, Any]:
     goal_date = today.isoformat()
     project_id = int(project["id"])
-    display_order = repo.next_daily_goal_display_order(connection, goal_date, project_id)
     goal_output = _goal_output_from_recommendation(today, project, recommendation)
-    daily_goal_id = repo.create_daily_goal(
-        connection,
-        project_id=project_id,
-        goal_date=goal_date,
-        goal_source="career_recommendation",
-        source_payload={
-            "source": "career_chat_recommendation",
-            "message_id": message_id,
-            "recommendation_index": recommendation_index,
-        },
-        context_snapshot={
-            "schema_version": "career_recommendation_goal_context.v1",
-            "project_id": project_id,
-            "project_name": project["name"],
-            "message_id": message_id,
-            "recommendation_index": recommendation_index,
-            "recommendation_title": recommendation.get("title"),
-            "goal_output_context_used": goal_output["context_used"],
-        },
-        generated_at=_now_text(),
-        display_order=display_order,
-    )
+    source_payload = {
+        "source": "career_chat_recommendation",
+        "message_id": message_id,
+        "recommendation_index": recommendation_index,
+    }
+    context_snapshot = {
+        "schema_version": "career_recommendation_goal_context.v1",
+        "project_id": project_id,
+        "project_name": project["name"],
+        "message_id": message_id,
+        "recommendation_index": recommendation_index,
+        "recommendation_title": recommendation.get("title"),
+        "goal_output_context_used": goal_output["context_used"],
+    }
+    existing_goal = _open_daily_goal_for_project_date(connection, goal_date, project_id)
+    if existing_goal is not None:
+        daily_goal_id = int(existing_goal["id"])
+        merged_source_payload = dict(existing_goal.get("source_payload") or {})
+        merged_source_payload["latest_career_recommendation"] = source_payload
+        repo.update_daily_goal(
+            connection,
+            daily_goal_id,
+            source_payload=merged_source_payload,
+            context_snapshot={**dict(existing_goal.get("context_snapshot") or {}), **context_snapshot},
+            generated_at=_now_text(),
+            status="active",
+        )
+        revision_source = "system_regeneration" if existing_goal.get("active_version_id") is not None else "initial_generation"
+        revision_reason = "Career recommendation adopted into the existing project daily goal."
+    else:
+        display_order = repo.next_daily_goal_display_order(connection, goal_date, project_id)
+        daily_goal_id = repo.create_daily_goal(
+            connection,
+            project_id=project_id,
+            goal_date=goal_date,
+            goal_source="career_recommendation",
+            source_payload=source_payload,
+            context_snapshot=context_snapshot,
+            generated_at=_now_text(),
+            display_order=display_order,
+        )
+        revision_source = "initial_generation"
+        revision_reason = "Career recommendation adopted as a project daily goal."
     version_id = repo.create_goal_version(
         connection,
         daily_goal_id=daily_goal_id,
-        version_no=1,
+        version_no=len(repo.list_goal_versions(connection, daily_goal_id)) + 1,
         is_active=1,
         main_goal=goal_output["main_goal"],
         goal_reason=goal_output["rationale"],
@@ -443,8 +471,8 @@ def _create_recommendation_goal(
         stretch_challenge=goal_output["stretch_challenge"],
         avoid_today=json.dumps(goal_output["do_not_do_today"], ensure_ascii=False, separators=(",", ":")),
         goal_type=goal_output["goal_type"],
-        revision_source="initial_generation",
-        revision_reason="Career recommendation adopted as an additional daily goal.",
+        revision_source=revision_source,
+        revision_reason=revision_reason,
         critic_result={
             "schema": "daily_goal.v1",
             "quality_status": "accepted",
@@ -583,7 +611,59 @@ def _payload_message(
     return f"已记录建议并加入「{project_name}」。"
 
 
+def _find_project_by_name_key(
+    connection,
+    name: str,
+    *,
+    include_archived: bool = False,
+) -> dict[str, Any] | None:
+    key = _project_name_key(name)
+    if not key:
+        return None
+    for project in repo.list_projects(connection, include_archived=include_archived):
+        if _project_name_key(project.get("name")) == key:
+            return project
+    return None
+
+
+def _open_daily_goal_for_project_date(
+    connection,
+    goal_date: str,
+    project_id: int,
+) -> dict[str, Any] | None:
+    candidates: list[dict[str, Any]] = []
+    for goal in repo.list_daily_goals_by_date(connection, goal_date):
+        if int(goal.get("project_id") or 0) != int(project_id):
+            continue
+        if str(goal.get("status") or "active") != "active":
+            continue
+        if repo.get_daily_checkin_for_goal(connection, int(goal["id"])) is not None:
+            continue
+        candidates.append(goal)
+    if not candidates:
+        return None
+    return sorted(candidates, key=_open_daily_goal_rank)[0]
+
+
+def _open_daily_goal_rank(goal: dict[str, Any]) -> tuple[int, int, int]:
+    source_rank = 0 if str(goal.get("goal_source") or "") == "daily_planning" else 1
+    return (source_rank, int(goal.get("display_order") or 0), int(goal.get("id") or 0))
+
+
 def _matching_projects(projects: list[dict[str, Any]], recommendation: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_text = " ".join(
+        str(recommendation.get(key) or "")
+        for key in ("title", "why_it_fits", "deliverable", "first_step")
+    )
+    text_key = _project_name_key(raw_text)
+    normalized_matches = [
+        project
+        for project in projects
+        if _project_name_key(project.get("name")) and _project_name_key(project.get("name")) in text_key
+    ]
+    if normalized_matches:
+        return normalized_matches
+
     text = _normalize_match_text(
         " ".join(
             str(recommendation.get(key) or "")
@@ -649,23 +729,6 @@ def _sync_user_profile_projects(connection) -> None:
     )
 
 
-def _sync_soul_if_project_changed(
-    db_path: str | Path,
-    *,
-    soul_path: str | Path,
-    project_changed: bool,
-) -> dict[str, Any]:
-    if not project_changed:
-        return {"status": "not_applicable"}
-    try:
-        from backend.services.project_lifecycle_service import sync_current_projects_to_soul
-
-        backup_path = sync_current_projects_to_soul(db_path, soul_path=soul_path)
-        return {"status": "synced", "soul_backup": str(backup_path)}
-    except Exception as exc:  # noqa: BLE001 - DB remains the source of truth
-        return {"status": "failed", "reason": str(exc)}
-
-
 def _positive_int(value: Any, field_name: str) -> int:
     parsed = _optional_positive_int(value, field_name)
     if parsed is None:
@@ -721,6 +784,10 @@ def _compact_text(value: Any, max_chars: int) -> str:
 
 def _normalize_match_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").casefold()).strip()
+
+
+def _project_name_key(value: Any) -> str:
+    return re.sub(r"[\s/_\-:：,，.。;；、()（）\[\]【】《》<>]+", "", str(value or "").casefold()).strip()
 
 
 def _now_text() -> str:

@@ -118,7 +118,8 @@ def test_soul_project_import_adds_updates_renames_and_completes_missing_active_p
         assert beta["priority"] == "P1"
         assert repo.project_target_goal(beta) == "写出 Beta 方案"
         assert "写出 Beta 第一版结构" in repo.project_today_goal(beta)
-        assert len(goals) == 2
+        assert goals == []
+        assert {item["today_goal_refresh"] for item in first["items"]} == {"skipped_soul_import"}
 
         repeated = import_current_projects_from_soul(db_path, soul_path=soul_path, today=WORKDAY).payload
         assert repeated["status"] == "no_change"

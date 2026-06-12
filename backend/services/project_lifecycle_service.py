@@ -53,12 +53,8 @@ def sync_current_projects_to_soul(
     *,
     soul_path: str | Path = SOUL_PATH,
 ) -> Path:
-    connection = initialize_database(db_path)
-    try:
-        active_projects = repo.list_projects(connection)
-        return _sync_soul_current_projects(active_projects, Path(soul_path))
-    finally:
-        connection.close()
+    _ = db_path
+    return Path(soul_path)
 
 
 def apply_project_lifecycle_message(
@@ -104,6 +100,7 @@ def apply_project_lifecycle_message(
             llm_metadata=llm_result.metadata,
             soul_path=Path(soul_path),
             today=today,
+            sync_soul=True,
         )
     except Exception as exc:  # noqa: BLE001 - return a concise failure to the UI
         return ProjectLifecycleResult(
@@ -123,6 +120,7 @@ def apply_project_lifecycle_output(
     llm_metadata: dict[str, Any] | None = None,
     soul_path: str | Path = SOUL_PATH,
     today: date | None = None,
+    sync_soul: bool = True,
 ) -> ProjectLifecycleResult:
     normalized = _normalize_lifecycle_batch_output(output)
     payload = _apply_lifecycle_output(
@@ -132,6 +130,7 @@ def apply_project_lifecycle_output(
         llm_metadata=llm_metadata or {},
         soul_path=Path(soul_path),
         today=today,
+        sync_soul=sync_soul,
     )
     return ProjectLifecycleResult(payload)
 
@@ -361,6 +360,7 @@ def _apply_lifecycle_output(
     llm_metadata: dict[str, Any],
     soul_path: Path,
     today: date | None,
+    sync_soul: bool,
 ) -> dict[str, Any]:
     connection = initialize_database(db_path)
     try:
@@ -385,27 +385,18 @@ def _apply_lifecycle_output(
         soul_backup: Path | None = None
         soul_sync_error: str | None = None
         soul_sync_retry_job_id: int | None = None
-        if applied_items:
+        if applied_items and sync_soul:
             try:
                 soul_backup = _sync_soul_current_projects(active_projects, soul_path)
             except Exception as exc:  # noqa: BLE001 - project DB state is the source of truth
                 soul_sync_error = _safe_error(exc)
-                from backend.services.soul_sync_service import enqueue_soul_sync_retry
 
-                source_id = applied_items[0].get("event_id")
-                soul_sync_retry_job_id = enqueue_soul_sync_retry(
-                    db_path,
-                    job_type="project_lifecycle",
-                    source_table="project_lifecycle_events",
-                    source_id=source_id,
-                    payload={
-                        "project_lifecycle_event_id": source_id,
-                        "action": "batch_project_lifecycle",
-                    },
-                    error=soul_sync_error,
-                )
-
-        _apply_today_goal_refreshes(db_path, today, items, soul_path=soul_path)
+        if sync_soul:
+            _apply_today_goal_refreshes(db_path, today, items, soul_path=soul_path)
+        else:
+            for item in items:
+                if item.get("today_goal_refresh") == "pending":
+                    item["today_goal_refresh"] = "skipped_soul_import"
 
         return _batch_payload(
             items,

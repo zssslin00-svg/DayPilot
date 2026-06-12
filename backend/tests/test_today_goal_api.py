@@ -15,6 +15,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 os.environ["DAYPILOT_LLM_MODE"] = "mock"
+os.environ.pop("DAYPILOT_AUTO_SYNC_PROJECTS_TO_SOUL", None)
 
 from backend.api.server import (  # noqa: E402
     NON_WORKDAY_MESSAGE,
@@ -531,7 +532,7 @@ def test_workday_today_goal_repairs_stale_checked_in_status_without_checkin() ->
             connection.close()
 
 
-def test_workday_today_goal_keeps_unchecked_existing_goal_from_completed_project() -> None:
+def test_workday_today_goal_hides_unchecked_existing_goal_from_completed_project() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         db_path = Path(temp_dir) / "daypilot-completed-project-pending-checkin.sqlite3"
         connection = initialize_database(db_path)
@@ -607,14 +608,7 @@ def test_workday_today_goal_keeps_unchecked_existing_goal_from_completed_project
 
         assert status == 200
         assert payload["active_project_count"] == 1
-        assert [goal["daily_goal"]["id"] for goal in payload["goals"]] == [
-            active_goal_id,
-            pending_goal_id,
-        ]
-        pending_goal = payload["goals"][1]
-        assert pending_goal["project"]["status"] == "completed"
-        assert pending_goal["daily_checkin"] is None
-        assert pending_goal["goal_output"]["main_goal"] == "Finish pending completed-project check-in."
+        assert [goal["daily_goal"]["id"] for goal in payload["goals"]] == [active_goal_id]
 
 
 def test_workday_generation_reads_required_context() -> None:
@@ -835,7 +829,7 @@ def main() -> None:
     test_workday_today_goal_reads_existing_goal()
     test_workday_today_goal_includes_existing_checkin()
     test_workday_today_goal_repairs_stale_checked_in_status_without_checkin()
-    test_workday_today_goal_keeps_unchecked_existing_goal_from_completed_project()
+    test_workday_today_goal_hides_unchecked_existing_goal_from_completed_project()
     test_workday_generation_reads_required_context()
     test_multi_project_generation_and_next_day_carryover()
     print("PASS: GET /api/today-goal generates, persists, reuses, and reads required context")

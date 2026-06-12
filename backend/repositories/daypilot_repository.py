@@ -294,6 +294,16 @@ TABLE_COLUMNS: dict[str, set[str]] = {
         "created_at",
         "updated_at",
     },
+    "career_chat_memory_summaries": {
+        "id",
+        "session_id",
+        "summary_payload",
+        "covered_through_message_id",
+        "source_message_ids",
+        "llm_metadata",
+        "created_at",
+        "updated_at",
+    },
     "career_recommendation_actions": {
         "id",
         "session_id",
@@ -363,6 +373,7 @@ JSON_FIELDS: dict[str, set[str]] = {
         "llm_metadata",
     },
     "career_profile_update_suggestions": {"suggestion_payload"},
+    "career_chat_memory_summaries": {"summary_payload", "source_message_ids", "llm_metadata"},
     "career_recommendation_actions": {"recommendation_snapshot", "source_payload"},
 }
 
@@ -377,6 +388,7 @@ UPDATED_AT_TABLES = {
     "weekly_focus",
     "career_chat_sessions",
     "career_profile_update_suggestions",
+    "career_chat_memory_summaries",
     "career_recommendation_actions",
 }
 
@@ -625,7 +637,7 @@ def get_daily_goal_by_date(connection: sqlite3.Connection, goal_date: str) -> Re
         """
         SELECT *
         FROM daily_goals
-        WHERE goal_date = ? AND goal_source = 'daily_planning'
+        WHERE goal_date = ? AND goal_source = 'daily_planning' AND status != 'archived'
         ORDER BY project_id, display_order, id
         """,
         (goal_date,),
@@ -643,7 +655,7 @@ def get_daily_goal_by_date_and_project(
         """
         SELECT *
         FROM daily_goals
-        WHERE goal_date = ? AND project_id = ? AND goal_source = 'daily_planning'
+        WHERE goal_date = ? AND project_id = ? AND goal_source = 'daily_planning' AND status != 'archived'
         ORDER BY display_order, id
         """,
         (goal_date, project_id),
@@ -654,7 +666,7 @@ def list_daily_goals_by_date(connection: sqlite3.Connection, goal_date: str) -> 
     return _fetch_all(
         connection,
         "daily_goals",
-        "SELECT * FROM daily_goals WHERE goal_date = ? ORDER BY project_id, display_order, id",
+        "SELECT * FROM daily_goals WHERE goal_date = ? AND status != 'archived' ORDER BY project_id, display_order, id",
         (goal_date,),
     )
 
@@ -681,7 +693,7 @@ def list_daily_goals_by_week(
     *,
     monday_to_friday_only: bool = True,
 ) -> list[Record]:
-    where = "week_id = ?"
+    where = "week_id = ? AND status != 'archived'"
     params: list[Any] = [week_id]
     if monday_to_friday_only:
         where += " AND is_workday = 1"
@@ -705,7 +717,7 @@ def list_recent_daily_goal_records(
         """
         SELECT *
         FROM daily_goals
-        WHERE goal_date < ?
+        WHERE goal_date < ? AND status != 'archived'
         ORDER BY goal_date DESC, project_id, display_order, id
         LIMIT ?
         """,
@@ -733,7 +745,7 @@ def list_recent_daily_goal_records_for_project(
         """
         SELECT *
         FROM daily_goals
-        WHERE goal_date < ? AND project_id = ?
+        WHERE goal_date < ? AND project_id = ? AND status != 'archived'
         ORDER BY goal_date DESC, display_order, id
         LIMIT ?
         """,
@@ -765,7 +777,7 @@ def list_daily_goal_records_between(
         """
         SELECT *
         FROM daily_goals
-        WHERE goal_date BETWEEN ? AND ?
+        WHERE goal_date BETWEEN ? AND ? AND status != 'archived'
         ORDER BY goal_date DESC, project_id, display_order, id
         """,
         (start_date, end_date),
@@ -1253,6 +1265,67 @@ def list_pending_career_profile_update_suggestions(
         """,
         params,
     )
+
+
+def create_career_chat_memory_summary(connection: sqlite3.Connection, **summary: Any) -> int:
+    return _insert(connection, "career_chat_memory_summaries", summary)
+
+
+def get_career_chat_memory_summary(connection: sqlite3.Connection, summary_id: int) -> Record | None:
+    return _fetch_by_id(connection, "career_chat_memory_summaries", summary_id)
+
+
+def get_career_chat_memory_summary_by_session(
+    connection: sqlite3.Connection,
+    session_id: int,
+) -> Record | None:
+    return _fetch_one(
+        connection,
+        "career_chat_memory_summaries",
+        """
+        SELECT *
+        FROM career_chat_memory_summaries
+        WHERE session_id = ?
+        """,
+        (session_id,),
+    )
+
+
+def update_career_chat_memory_summary(
+    connection: sqlite3.Connection,
+    summary_id: int,
+    **changes: Any,
+) -> Record | None:
+    return _update(connection, "career_chat_memory_summaries", summary_id, changes)
+
+
+def upsert_career_chat_memory_summary(
+    connection: sqlite3.Connection,
+    *,
+    session_id: int,
+    summary_payload: dict[str, Any],
+    covered_through_message_id: int | None,
+    source_message_ids: list[int],
+    llm_metadata: dict[str, Any],
+) -> Record:
+    existing = get_career_chat_memory_summary_by_session(connection, session_id)
+    payload = {
+        "session_id": session_id,
+        "summary_payload": summary_payload,
+        "covered_through_message_id": covered_through_message_id,
+        "source_message_ids": source_message_ids,
+        "llm_metadata": llm_metadata,
+    }
+    if existing is None:
+        summary_id = create_career_chat_memory_summary(connection, **payload)
+        created = get_career_chat_memory_summary(connection, summary_id)
+        if created is None:
+            raise RuntimeError("career_chat_memory_summary_was_not_persisted")
+        return created
+    updated = update_career_chat_memory_summary(connection, int(existing["id"]), **payload)
+    if updated is None:
+        raise RuntimeError("career_chat_memory_summary_was_not_updated")
+    return updated
 
 
 def create_career_recommendation_action(connection: sqlite3.Connection, **action: Any) -> int:

@@ -406,6 +406,19 @@ CREATE TABLE IF NOT EXISTS career_profile_update_suggestions (
   FOREIGN KEY (message_id) REFERENCES career_chat_messages(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS career_chat_memory_summaries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL UNIQUE,
+  summary_payload TEXT NOT NULL DEFAULT '{}',
+  covered_through_message_id INTEGER,
+  source_message_ids TEXT NOT NULL DEFAULT '[]',
+  llm_metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (session_id) REFERENCES career_chat_sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY (covered_through_message_id) REFERENCES career_chat_messages(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS career_recommendation_actions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id INTEGER NOT NULL,
@@ -434,5 +447,7 @@ CREATE INDEX IF NOT EXISTS idx_career_chat_messages_session
   ON career_chat_messages(session_id, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_career_profile_suggestions_status
   ON career_profile_update_suggestions(status, session_id, id);
+CREATE INDEX IF NOT EXISTS idx_career_chat_memory_summaries_session
+  ON career_chat_memory_summaries(session_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_career_recommendation_actions_message
   ON career_recommendation_actions(message_id, recommendation_index);

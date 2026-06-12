@@ -13,9 +13,11 @@ from backend.config.settings import DayPilotSettings
 from backend.repositories import daypilot_repository as repo
 from backend.repositories.database import DEFAULT_DB_PATH, initialize_database
 from backend.services.career_recommendation_service import attach_recommendation_actions
+from backend.services.context_waterline_service import prepare_career_chat_context
 from backend.schemas.json_schema import validate_json_schema
 from backend.services.llm_client import generate_json_with_fallback
 from backend.services.soul_context import SOUL_PATH, load_soul_context
+from backend.services.soul_frontend_sync_service import record_frontend_activity_to_soul
 from backend.services.workday_policy import today_in_workday_timezone
 
 
@@ -186,6 +188,23 @@ def send_career_chat_message(
                 today=today,
                 soul_path=Path(soul_path),
             )
+            soul_for_prompt = str(context.pop("soul_content", context.get("soul_excerpt") or ""))
+    finally:
+        connection.close()
+
+    waterline_result = prepare_career_chat_context(
+        db_path,
+        context=context,
+        soul_text=soul_for_prompt,
+        settings=settings,
+        soul_path=soul_path,
+    )
+    context = waterline_result.context
+    soul_for_prompt = waterline_result.soul_for_prompt
+
+    connection = initialize_database(db_path)
+    try:
+        with connection:
             user_message_id = repo.create_career_chat_message(
                 connection,
                 session_id=session_id,
@@ -202,7 +221,7 @@ def send_career_chat_message(
             prompt_version_deepseek=PROMPT_VERSION_DEEPSEEK,
             prompt_version_mock=PROMPT_VERSION_MOCK,
             mock_model_name=MOCK_MODEL_NAME,
-            build_messages=lambda soul: _career_chat_messages(context, soul),
+            build_messages=lambda _soul: _career_chat_messages(context, soul_for_prompt),
             mock_generate=lambda: MockCareerPlanningAdapter().generate(context),
             validator=lambda output: validate_career_chat_response(
                 output,
@@ -222,6 +241,10 @@ def send_career_chat_message(
         )
         output = normalize_career_chat_response(llm_result.output)
         validate_career_chat_response(output, active_project_names=_active_project_names(context))
+        llm_metadata = {
+            **llm_result.metadata,
+            "context_waterline": waterline_result.metadata,
+        }
     except Exception as exc:  # noqa: BLE001 - API returns concise generation failure
         raise CareerChatGenerationError(_safe_error(exc)) from exc
 
@@ -236,7 +259,7 @@ def send_career_chat_message(
                 recommendations=output["recommendations"],
                 profile_update_suggestions=output["profile_update_suggestions"],
                 context_snapshot=_context_snapshot(context),
-                llm_metadata=llm_result.metadata,
+                llm_metadata=llm_metadata,
             )
             suggestion_records = _create_and_apply_profile_suggestions(
                 connection,
@@ -256,6 +279,7 @@ def send_career_chat_message(
         db_path,
         applied_suggestion_count=len(suggestion_records),
         soul_path=soul_path,
+        today=today,
     )
 
     if assistant_message is None or user_message is None or session is None:
@@ -269,7 +293,7 @@ def send_career_chat_message(
             "recommendations": assistant_message.get("recommendations") if assistant_message else output["recommendations"],
             "profile_update_suggestions": suggestion_records,
             "career_profile_update": career_profile_update,
-            "llm_metadata": llm_result.metadata,
+            "llm_metadata": llm_metadata,
         }
     )
 
@@ -329,6 +353,7 @@ def _sync_auto_applied_career_profile(
     *,
     applied_suggestion_count: int,
     soul_path: str | Path,
+    today: date,
 ) -> dict[str, Any]:
     if applied_suggestion_count <= 0:
         return {
@@ -339,22 +364,20 @@ def _sync_auto_applied_career_profile(
             "soul_sync_error": None,
         }
 
-    soul_synced = False
-    soul_sync_error = None
-    soul_backup_path = None
-    try:
-        backup_path = sync_career_profile_to_soul(db_path, soul_path=soul_path)
-        soul_synced = True
-        soul_backup_path = str(backup_path) if backup_path is not None else None
-    except Exception as exc:  # noqa: BLE001 - DB profile remains source of truth
-        soul_sync_error = _safe_error(exc)
+    sync_result = record_frontend_activity_to_soul(
+        soul_path=soul_path,
+        record_date=today,
+        record_type="career-profile",
+        summary=f"职业画像更新：自动应用 {applied_suggestion_count} 条前端建议。",
+    )
 
     return {
         "status": "applied",
         "applied_suggestion_count": applied_suggestion_count,
-        "soul_synced": soul_synced,
-        "soul_backup_path": soul_backup_path,
-        "soul_sync_error": soul_sync_error,
+        "soul_synced": bool(sync_result.get("soul_synced")),
+        "soul_backup_path": sync_result.get("soul_backup"),
+        "soul_sync_error": sync_result.get("reason") if sync_result.get("status") == "failed" else None,
+        "soul_sync": sync_result,
     }
 
 
@@ -442,15 +465,12 @@ def decide_career_profile_suggestion(
     finally:
         connection.close()
 
-    soul_synced = False
-    soul_sync_error = None
-    soul_backup_path = None
-    try:
-        backup_path = sync_career_profile_to_soul(db_path, soul_path=soul_path)
-        soul_synced = True
-        soul_backup_path = str(backup_path) if backup_path is not None else None
-    except Exception as exc:  # noqa: BLE001 - DB profile remains source of truth
-        soul_sync_error = _safe_error(exc)
+    sync_result = record_frontend_activity_to_soul(
+        soul_path=soul_path,
+        record_date=today_in_workday_timezone(),
+        record_type="career-profile",
+        summary=f"职业画像更新：手动应用建议 {suggestion_id}。",
+    )
 
     connection = initialize_database(db_path)
     try:
@@ -463,9 +483,10 @@ def decide_career_profile_suggestion(
             "status": "applied",
             "suggestion": _public_suggestion(suggestion_record or updated),
             "career_profile": (profile or {}).get("career_profile") or {},
-            "soul_synced": soul_synced,
-            "soul_backup_path": soul_backup_path,
-            "soul_sync_error": soul_sync_error,
+            "soul_synced": bool(sync_result.get("soul_synced")),
+            "soul_backup_path": sync_result.get("soul_backup"),
+            "soul_sync_error": sync_result.get("reason") if sync_result.get("status") == "failed" else None,
+            "soul_sync": sync_result,
         }
     )
 
@@ -475,14 +496,8 @@ def sync_career_profile_to_soul(
     *,
     soul_path: str | Path = SOUL_PATH,
 ) -> Path | None:
-    connection = initialize_database(db_path)
-    try:
-        profile = repo.get_user_profile(connection)
-        if profile is None:
-            raise CareerChatValidationError("user_profile_not_found")
-        return _sync_soul_career_sections(Path(soul_path), profile.get("career_profile") or {})
-    finally:
-        connection.close()
+    _ = db_path
+    return Path(soul_path)
 
 
 def validate_career_chat_response(
@@ -616,10 +631,11 @@ def _build_career_context(
         "recent_checkins": repo.list_recent_daily_checkins(connection, today_text, limit=6),
         "recent_feedback_messages": repo.list_recent_feedback_messages(connection, today_text, limit=8),
         "recent_weekly_focus": repo.list_recent_weekly_focus(connection, limit=5),
-        "chat_history": repo.list_recent_career_chat_messages(connection, session_id, limit=10),
+        "chat_history": repo.list_recent_career_chat_messages(connection, session_id, limit=24),
         "soul_loaded": soul.loaded,
         "soul_path": soul.path,
         "soul_excerpt": soul.content[:6000],
+        "soul_content": soul.content,
     }
 
 
@@ -661,6 +677,9 @@ Use concise Chinese for user-facing text.
         "recent_checkins": context["recent_checkins"],
         "recent_feedback_messages": context["recent_feedback_messages"],
         "recent_weekly_focus": context["recent_weekly_focus"],
+        "conversation_summary": context.get("conversation_summary") or {},
+        "omitted_counts": context.get("omitted_counts") or {},
+        "context_waterline": context.get("context_waterline") or {},
         "chat_history": [
             {
                 "role": item["role"],
@@ -678,6 +697,7 @@ Use concise Chinese for user-facing text.
             "Each structured recommendation must include project_binding.",
             "Use project_binding.kind='existing_project' only when project_binding.project_name exactly matches active_projects[].name.",
             "Use project_binding.kind='new_project' when this is not a direct extension of an active project; project_name is the new project name.",
+            "When conversation_summary is present, treat it as compressed older chat history and use chat_history as the recent verbatim window.",
             "profile_update_suggestions are saved automatically, so include only stable and evidence-backed profile facts.",
             "Do not output Markdown fences.",
         ],
@@ -700,6 +720,8 @@ def _context_snapshot(context: dict[str, Any]) -> dict[str, Any]:
         "recent_feedback_message_ids": [item["id"] for item in context.get("recent_feedback_messages") or []],
         "recent_weekly_focus_ids": [item["id"] for item in context.get("recent_weekly_focus") or []],
         "chat_history_message_ids": [item["id"] for item in context.get("chat_history") or []],
+        "conversation_summary_present": bool(context.get("conversation_summary")),
+        "context_waterline": context.get("context_waterline") or {},
         "soul_loaded": context.get("soul_loaded"),
         "soul_path": context.get("soul_path"),
     }

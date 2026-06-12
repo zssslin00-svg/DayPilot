@@ -21,6 +21,7 @@ class DayPilotSettings:
     deepseek_thinking: str
     llm_log_enabled: bool = True
     llm_log_dir: str = str(default_llm_log_dir())
+    context_limit_tokens: int = 64_000
 
     @property
     def has_deepseek_key(self) -> bool:
@@ -68,6 +69,7 @@ def load_daypilot_settings(
         deepseek_thinking=thinking,
         llm_log_enabled=_bool(merged.get("DAYPILOT_LLM_LOG_ENABLED"), default=True),
         llm_log_dir=merged.get("DAYPILOT_LLM_LOG_DIR") or str(default_llm_log_dir()),
+        context_limit_tokens=_positive_int(merged.get("DAYPILOT_CONTEXT_LIMIT_TOKENS"), 64_000),
     )
 
 

@@ -119,6 +119,7 @@ def import_current_projects_from_soul(
             },
             soul_path=path,
             today=today,
+            sync_soul=False,
         ).payload
     else:
         lifecycle_payload = {

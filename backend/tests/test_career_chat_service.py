@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 os.environ["DAYPILOT_LLM_MODE"] = "mock"
 
+from backend.config.settings import DayPilotSettings  # noqa: E402
 from backend.repositories import daypilot_repository as repo  # noqa: E402
 from backend.repositories.database import initialize_database  # noqa: E402
 from backend.services import career_chat_service as career_chat_module  # noqa: E402
@@ -20,6 +21,20 @@ from backend.services.career_chat_service import (  # noqa: E402
     get_career_chat_history,
     send_career_chat_message,
 )
+
+
+def _waterline_settings(limit: int) -> DayPilotSettings:
+    return DayPilotSettings(
+        llm_mode="mock",
+        deepseek_api_key=None,
+        deepseek_base_url="https://api.deepseek.com",
+        deepseek_model="deepseek-v4-pro",
+        deepseek_timeout_seconds=3,
+        deepseek_max_tokens=300,
+        deepseek_thinking="disabled",
+        llm_log_enabled=False,
+        context_limit_tokens=limit,
+    )
 
 
 def _soul_file(root: Path) -> Path:
@@ -125,8 +140,8 @@ def test_career_chat_saves_chat_and_auto_applies_suggestions_without_touching_go
         assert len(history["messages"]) == 2
         assert history["pending_profile_update_suggestions"] == []
         soul_text = soul_path.read_text(encoding="utf-8")
-        assert "## 当前技能点" in soul_text
-        assert "## 发展意愿" in soul_text
+        assert "## 最近记录" in soul_text
+        assert "[career-profile]" in soul_text
 
         connection = initialize_database(db_path)
         try:
@@ -350,10 +365,8 @@ def test_legacy_profile_suggestion_apply_updates_structured_profile_and_soul() -
         assert applied["soul_synced"] is True
         assert applied["career_profile"]
         soul_text = soul_path.read_text(encoding="utf-8")
-        assert "## 当前技能点" in soul_text
-        assert "## 性格与工作方式" in soul_text
-        assert "## 发展意愿" in soul_text
-        assert "## 职业价值观与约束" in soul_text
+        assert "## 最近记录" in soul_text
+        assert "[career-profile]" in soul_text
 
         connection = initialize_database(db_path)
         try:
@@ -421,6 +434,83 @@ def test_legacy_profile_suggestion_dismiss_does_not_update_profile() -> None:
         assert profile["career_profile"] == before_profile
 
 
+def test_career_chat_uses_waterline_summary_without_deleting_history() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        db_path = root / "career-waterline.sqlite3"
+        soul_path = _soul_file(root)
+        _seed_profile_and_project(db_path)
+        connection = initialize_database(db_path)
+        try:
+            with connection:
+                session_id = repo.create_career_chat_session(connection, title="long session")
+                for index in range(1, 13):
+                    repo.create_career_chat_message(
+                        connection,
+                        session_id=session_id,
+                        role="user" if index % 2 else "assistant",
+                        content=(
+                            f"历史职业规划消息 {index} "
+                            + ("需要压缩的旧上下文 " * 120)
+                            + f" TAIL_SHOULD_BE_GONE_{index:02d}"
+                        ),
+                        recommendations=[],
+                        context_snapshot={"source": "waterline-test"},
+                    )
+        finally:
+            connection.close()
+
+        captured_messages: list[dict[str, str]] = []
+        original_generate = career_chat_module.generate_json_with_fallback
+
+        def fake_generate_json_with_fallback(**kwargs: object) -> SimpleNamespace:
+            build_messages = kwargs["build_messages"]
+            normalizer = kwargs["normalizer"]
+            validator = kwargs["validator"]
+            messages = build_messages("uncompressed soul should be ignored")
+            captured_messages.extend(messages)
+            output = {
+                "schema_version": "career_chat_response.v1",
+                "assistant_message": "我会基于压缩后的会话摘要和最近窗口继续判断。",
+                "recommendations": [],
+                "profile_update_suggestions": [],
+            }
+            normalized = normalizer(output)
+            validator(normalized)
+            return SimpleNamespace(output=normalized, metadata={"llm_mode_used": "test"})
+
+        career_chat_module.generate_json_with_fallback = fake_generate_json_with_fallback
+        try:
+            result = send_career_chat_message(
+                db_path,
+                {"session_id": session_id, "message": "继续基于前面的方向帮我判断下一步。"},
+                settings=_waterline_settings(260),
+                soul_path=soul_path,
+                today=date(2026, 6, 11),
+            ).payload
+        finally:
+            career_chat_module.generate_json_with_fallback = original_generate
+
+        prompt_text = "\n".join(item["content"] for item in captured_messages)
+        assert "conversation_summary" in prompt_text
+        assert "TAIL_SHOULD_BE_GONE_01" not in prompt_text
+        assert result["llm_metadata"]["context_waterline"]["tier"] == "tier_3"
+        assert result["assistant_message"]["llm_metadata"]["context_waterline"]["tier"] == "tier_3"
+        assert result["assistant_message"]["context_snapshot"]["context_waterline"]["tier"] == "tier_3"
+
+        history = get_career_chat_history(db_path, session_id)
+        assert len(history["messages"]) == 14
+        assert any("TAIL_SHOULD_BE_GONE_01" in item["content"] for item in history["messages"])
+
+        connection = initialize_database(db_path)
+        try:
+            summary = repo.get_career_chat_memory_summary_by_session(connection, session_id)
+        finally:
+            connection.close()
+        assert summary is not None
+        assert summary["summary_payload"]["schema_version"] == "career_chat_memory_summary.v1"
+
+
 def test_career_chat_with_missing_soul_and_empty_profile_still_gives_conservative_advice() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
@@ -451,6 +541,7 @@ def main() -> None:
     test_career_chat_rejects_card_promise_without_structured_cards()
     test_legacy_profile_suggestion_apply_updates_structured_profile_and_soul()
     test_legacy_profile_suggestion_dismiss_does_not_update_profile()
+    test_career_chat_uses_waterline_summary_without_deleting_history()
     test_career_chat_with_missing_soul_and_empty_profile_still_gives_conservative_advice()
     print("PASS: career chat service preserves goal loop and auto-applies profile updates")
 

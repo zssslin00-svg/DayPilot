@@ -42,12 +42,15 @@ def _request(
     soul_path: Path | None = None,
 ) -> tuple[int, dict[str, Any]]:
     port = _free_port()
+    resolved_soul_path = soul_path or db_path.parent / "SOUL.md"
+    if not resolved_soul_path.exists():
+        _soul_file(db_path.parent)
     server = create_server(
         "127.0.0.1",
         port,
         today_provider=lambda: today,
         db_path=db_path,
-        soul_path=soul_path or Path("SOUL.md"),
+        soul_path=resolved_soul_path,
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -236,17 +239,19 @@ def test_weekly_report_feedback_creates_version_chain() -> None:
         assert len(revised["weekly_report_versions"]) == 2
         assert revised["weekly_report_versions"][-1]["revision_source"] == "user_feedback"
         memory = revised["weekly_report_memory_update"]
-        assert memory["status"] in {"applied", "queued"}
-        assert memory["applied_items_count"] >= 1
+        assert memory["status"] == "synced"
+        assert memory["recent_record"] == "added"
+        assert memory["soul_sync_queued"] is False
 
         connection = connect_database(db_path)
         try:
             profile = repo.get_user_profile(connection)
-            weekly_preferences = profile["goal_preferences"]["weekly_report_preferences"]
-            assert any(weekly_preferences[key] for key in weekly_preferences)
+            assert "weekly_report_preferences" not in profile["goal_preferences"]
         finally:
             connection.close()
-        assert "下周计划要写成可验收的结果目标" in soul_path.read_text(encoding="utf-8")
+        soul_text = soul_path.read_text(encoding="utf-8")
+        assert "## 最近记录" in soul_text
+        assert "[weekly-report]" in soul_text
         assert revised["weekly_report_versions"][-1]["feedback_message"] == "把下周计划写得更可验收。"
 
         bad_status, bad_payload = _request(

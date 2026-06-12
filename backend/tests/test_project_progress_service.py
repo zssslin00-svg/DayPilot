@@ -212,6 +212,7 @@ def test_mock_update_writes_event_and_updates_summary() -> None:
         root = Path(temp_dir)
         db_path = root / "daypilot-project-progress.sqlite3"
         soul_path = _soul_file(root)
+        before_soul = soul_path.read_text(encoding="utf-8")
         checkin_id = _seed_db(db_path)
 
         result = update_project_progress_for_checkin(
@@ -241,8 +242,10 @@ def test_mock_update_writes_event_and_updates_summary() -> None:
         assert "前端提示需要更精简" in project["status_summary"]
         assert len(events) == 1
         assert events[0]["applied_to_summary"] == 1
-        assert result["soul_synced"] is True
-        assert "当前进度：" in soul_path.read_text(encoding="utf-8")
+        assert result["soul_synced"] is False
+        assert result["soul_sync_queued"] is False
+        assert result["soul_sync_disabled_reason"] == "project_progress_no_longer_writes_soul"
+        assert soul_path.read_text(encoding="utf-8") == before_soul
 
 
 def test_low_confidence_deepseek_output_still_updates_summary() -> None:
@@ -322,7 +325,7 @@ def test_invalid_deepseek_output_falls_back_to_mock_update() -> None:
         assert result["llm_mode_used"] == "mock"
 
 
-def test_project_progress_soul_failure_is_queued_and_retry_succeeds() -> None:
+def test_project_progress_no_longer_queues_soul_retry() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         db_path = root / "daypilot-project-progress-soul-retry.sqlite3"
@@ -339,13 +342,11 @@ def test_project_progress_soul_failure_is_queued_and_retry_succeeds() -> None:
 
         assert result["status"] == "updated"
         assert result["soul_synced"] is False
-        assert result["soul_sync_queued"] is True
+        assert result["soul_sync_queued"] is False
+        assert result["soul_sync_disabled_reason"] == "project_progress_no_longer_writes_soul"
 
-        _soul_file(root)
         retry_payload = retry_soul_sync_jobs(db_path, soul_path=soul_path).payload
-        assert retry_payload["retried"] == 1
-        assert retry_payload["results"][0]["status"] == "succeeded"
-        assert "当前进度：" in soul_path.read_text(encoding="utf-8")
+        assert retry_payload["retried"] == 0
 
 
 def test_editing_same_checkin_supersedes_old_event() -> None:
@@ -424,7 +425,7 @@ def main() -> None:
     test_mock_update_writes_event_and_updates_summary()
     test_low_confidence_deepseek_output_still_updates_summary()
     test_invalid_deepseek_output_falls_back_to_mock_update()
-    test_project_progress_soul_failure_is_queued_and_retry_succeeds()
+    test_project_progress_no_longer_queues_soul_retry()
     test_editing_same_checkin_supersedes_old_event()
     print("PASS: project progress seeding, DeepSeek routing, fallback, and edits verified")
 

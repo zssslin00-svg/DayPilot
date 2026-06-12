@@ -146,12 +146,14 @@ def test_prefer_dotenv_allows_environment_key_when_dotenv_key_is_blank() -> None
             env={
                 "DAYPILOT_PREFER_DOTENV": "1",
                 "DEEPSEEK_API_KEY": "shell-key-1234",
+                "DAYPILOT_CONTEXT_LIMIT_TOKENS": "32000",
             },
             dotenv_path=dotenv,
         )
 
         assert settings.llm_mode == "deepseek"
         assert settings.deepseek_api_key == "shell-key-1234"
+        assert settings.context_limit_tokens == 32000
 
 
 def test_mock_mode_never_calls_deepseek() -> None:

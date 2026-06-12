@@ -13,11 +13,10 @@ from backend.repositories.database import initialize_database
 from backend.services.goal_critic import ensure_goal_quality
 from backend.services.goal_generation_resources import validate_daily_goal_output
 from backend.services.llm_client import generate_json_with_fallback
-from backend.services.profile_memory_service import apply_profile_memory_from_feedback
 from backend.services.soul_context import SOUL_PATH
+from backend.services.soul_frontend_sync_service import sync_goal_feedback_to_soul
 from backend.services.today_goal_service import (
     goal_output_from_record,
-    sync_current_projects_to_soul_if_requested,
     update_project_today_goal_from_output,
 )
 
@@ -57,7 +56,6 @@ def revise_goal_from_feedback(
         raise GoalFeedbackValidationError("message 不能为空。")
 
     connection = initialize_database(db_path)
-    sync_source_goal_id: int | None = None
     try:
         with connection:
             goal_record = _resolve_goal_record(connection, feedback_date, request_body.get("goal_id"))
@@ -142,14 +140,13 @@ def revise_goal_from_feedback(
                 revision_count=int(daily_goal.get("revision_count") or 0) + 1,
                 context_snapshot=snapshot,
             )
-            if update_project_today_goal_from_output(
+            update_project_today_goal_from_output(
                 connection,
                 int(daily_goal["project_id"]),
                 revised_goal,
                 source="goal_feedback_revision",
                 daily_goal_id=int(daily_goal["id"]),
-            ):
-                sync_source_goal_id = int(daily_goal["id"])
+            )
             repo.update_feedback_message(
                 connection,
                 feedback_id,
@@ -167,20 +164,21 @@ def revise_goal_from_feedback(
                 raise GoalFeedbackPersistenceError("反馈修正保存后无法读取。")
 
         updated_goal["goal_output"] = revised_goal
-        if sync_source_goal_id is not None:
-            sync_current_projects_to_soul_if_requested(db_path, soul_path, sync_source_goal_id)
-        profile_memory_update = apply_profile_memory_from_feedback(
+        soul_sync = sync_goal_feedback_to_soul(
             db_path,
-            int(feedback_message["id"]),
-            feedback_signal,
+            daily_goal_id=int(daily_goal["id"]),
+            feedback_message_id=int(feedback_message["id"]),
+            revised_goal=revised_goal,
             settings=settings,
             soul_path=soul_path,
-        ).payload
+        )
         memory_update = {
             "action": _memory_action(feedback_signal),
             "scope": feedback_signal["memory_scope"],
             "suggestions": feedback_signal.get("memory_update_suggestion", []),
-            **profile_memory_update,
+            "status": "skipped",
+            "reason": "profile_memory_to_soul_disabled",
+            "soul_sync": soul_sync,
         }
         return GoalFeedbackResult(
             updated_goal=updated_goal,

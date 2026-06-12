@@ -30,17 +30,50 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def _soul_file(root: Path) -> Path:
+    soul_path = root / "SOUL.md"
+    soul_path.write_text(
+        "\n".join(
+            [
+                "# DayPilot SOUL",
+                "",
+                "## 当前项目",
+                "",
+                "1. DayPilot MVP：当前进度：准备周报测试。项目今日目标：生成周报。",
+                "",
+                "## 用户偏好",
+                "",
+                "- 小而可交付。",
+                "",
+                "## 周报原则",
+                "",
+                "- 周报只能总结有证据的完成结果。",
+                "",
+                "## 输出纪律",
+                "",
+                "- 只输出需要的内容。",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return soul_path
+
+
 def _post_weekly_report(
     today: date,
     db_path: Path,
     body: dict[str, Any],
 ) -> tuple[int, dict[str, Any]]:
     port = _free_port()
+    soul_path = db_path.parent / "SOUL.md"
+    if not soul_path.exists():
+        _soul_file(db_path.parent)
     server = create_server(
         "127.0.0.1",
         port,
         today_provider=lambda: today,
         db_path=db_path,
+        soul_path=soul_path,
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

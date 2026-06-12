@@ -359,48 +359,14 @@ def _sync_progress_to_soul(
     event_id: int,
     soul_path: Path,
 ) -> dict[str, Any]:
-    try:
-        from backend.services.project_lifecycle_service import sync_current_projects_to_soul
-
-        backup_path = sync_current_projects_to_soul(db_path, soul_path=soul_path)
-        return {
-            "soul_synced": True,
-            "soul_backup": str(backup_path),
-            "soul_sync_queued": False,
-            "soul_sync_retry_job_id": None,
-            "soul_sync_error": None,
-        }
-    except Exception as exc:  # noqa: BLE001 - project progress is already persisted
-        error = _safe_error(exc)
-        try:
-            from backend.services.soul_sync_service import enqueue_soul_sync_retry
-
-            retry_job_id = enqueue_soul_sync_retry(
-                db_path,
-                job_type="project_lifecycle",
-                source_table="project_progress_events",
-                source_id=event_id,
-                payload={
-                    "project_progress_event_id": event_id,
-                    "action": "sync_project_progress_to_soul",
-                },
-                error=error,
-            )
-        except Exception as queue_exc:  # noqa: BLE001 - keep check-in response compact
-            return {
-                "soul_synced": False,
-                "soul_backup": None,
-                "soul_sync_queued": False,
-                "soul_sync_retry_job_id": None,
-                "soul_sync_error": f"{error}; retry_queue_failed={_safe_error(queue_exc)}",
-            }
-        return {
-            "soul_synced": False,
-            "soul_backup": None,
-            "soul_sync_queued": True,
-            "soul_sync_retry_job_id": retry_job_id,
-            "soul_sync_error": error,
-        }
+    return {
+        "soul_synced": False,
+        "soul_backup": None,
+        "soul_sync_queued": False,
+        "soul_sync_retry_job_id": None,
+        "soul_sync_error": None,
+        "soul_sync_disabled_reason": "project_progress_no_longer_writes_soul",
+    }
 
 
 def _restore_superseded_project_summaries(

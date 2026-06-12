@@ -13,8 +13,8 @@ from backend.repositories.database import initialize_database
 from backend.schemas.json_schema import JsonSchemaValidationError
 from backend.services.llm_client import generate_json_with_fallback
 from backend.services.soul_context import SOUL_PATH
+from backend.services.soul_frontend_sync_service import sync_weekly_report_to_soul
 from backend.services.weekly_report_memory_service import (
-    apply_weekly_report_memory_from_feedback,
     weekly_report_preferences_from_profile,
 )
 from backend.services.weekly_report_resources import validate_weekly_report_output
@@ -67,6 +67,7 @@ def generate_weekly_report(
     revision_source: str | None = None,
     revision_reason: str | None = None,
     feedback_message: str | None = None,
+    soul_path: str | Path | None = None,
 ) -> WeeklyReportResult:
     week_id = _parse_week_id(request_body.get("week_id"), default_date)
     connection = initialize_database(db_path)
@@ -193,6 +194,15 @@ def generate_weekly_report(
                 for version in repo.list_weekly_report_versions(connection, weekly_report_id)
             ]
 
+        soul_sync = None
+        if soul_path is not None:
+            soul_sync = sync_weekly_report_to_soul(
+                db_path,
+                weekly_report_id=int(weekly_report["id"]),
+                action="feedback" if feedback_message else (revision_source or "generate"),
+                feedback_message=feedback_message,
+                soul_path=soul_path,
+            )
         return WeeklyReportResult(
             weekly_report=weekly_report,
             report_output=report_output,
@@ -200,6 +210,7 @@ def generate_weekly_report(
             source_snapshot=source_snapshot,
             weekly_report_versions=weekly_report_versions,
             created=created,
+            weekly_report_memory_update=soul_sync,
         )
     except sqlite3.DatabaseError as exc:
         raise WeeklyReportGenerationError(str(exc)) from exc
@@ -235,22 +246,15 @@ def regenerate_weekly_report_from_feedback(
             revision_source="user_feedback",
         revision_reason="根据用户周报修改意见重新生成。",
             feedback_message=message,
-        )
-    except WeeklyReportGenerationError:
-        apply_weekly_report_memory_from_feedback(
-            db_path,
-            week_id=week_id,
-            feedback_message=message,
             soul_path=soul_path,
         )
+    except WeeklyReportGenerationError:
         raise
-    memory_update = apply_weekly_report_memory_from_feedback(
-        db_path,
-        week_id=week_id,
-        feedback_message=message,
-        soul_path=soul_path,
-    ).payload
-    return replace(result, weekly_report_memory_update=memory_update)
+    return replace(
+        result,
+        weekly_report_memory_update=result.weekly_report_memory_update
+        or {"status": "skipped", "reason": "soul_sync_not_requested"},
+    )
 
 
 def build_weekly_snapshot(connection, week_id: str, *, generated_on: date) -> dict[str, Any]:

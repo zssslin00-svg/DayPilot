@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 os.environ["DAYPILOT_LLM_MODE"] = "mock"
+os.environ.pop("DAYPILOT_AUTO_SYNC_PROJECTS_TO_SOUL", None)
 
 from backend.repositories import daypilot_repository as repo  # noqa: E402
 from backend.repositories.database import initialize_database  # noqa: E402
@@ -130,7 +131,7 @@ def _seed_project_and_message(db_path: Path, recommendations: list[dict] | None 
     return project_id, daily_goal_id, message_id
 
 
-def test_adopting_existing_project_recommendation_adds_independent_daily_goal() -> None:
+def test_adopting_existing_project_recommendation_reuses_project_daily_goal() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         db_path = root / "career-recommendation.sqlite3"
@@ -146,14 +147,15 @@ def test_adopting_existing_project_recommendation_adds_independent_daily_goal() 
 
         assert result["status"] == "applied"
         assert result["project"]["id"] == project_id
-        extra_goal_id = result["goal"]["daily_goal"]["id"]
-        assert extra_goal_id != primary_goal_id
-        assert result["goal"]["daily_goal"]["goal_source"] == "career_recommendation"
+        adopted_goal_id = result["goal"]["daily_goal"]["id"]
+        assert adopted_goal_id == primary_goal_id
+        assert result["goal"]["daily_goal"]["goal_source"] == "daily_planning"
 
         connection = initialize_database(db_path)
         try:
             goals = repo.list_daily_goals_by_date(connection, WORKDAY.isoformat())
-            assert [goal["id"] for goal in goals] == [primary_goal_id, extra_goal_id]
+            assert [goal["id"] for goal in goals] == [primary_goal_id]
+            assert len(repo.list_goal_versions(connection, primary_goal_id)) == 2
             primary = repo.get_goal_with_active_version_by_date_and_project(
                 connection,
                 WORKDAY.isoformat(),
@@ -162,7 +164,7 @@ def test_adopting_existing_project_recommendation_adds_independent_daily_goal() 
             assert primary["daily_goal"]["id"] == primary_goal_id
             repo.create_daily_checkin(
                 connection,
-                daily_goal_id=extra_goal_id,
+                daily_goal_id=primary_goal_id,
                 checkin_date=WORKDAY.isoformat(),
                 week_id="2026-W24",
                 completion_text="完成奖励机制对比报告。",
@@ -174,8 +176,7 @@ def test_adopting_existing_project_recommendation_adds_independent_daily_goal() 
                 actual_outputs=["RL 奖励机制对比报告"],
                 processor_snapshot={"source": "test"},
             )
-            assert repo.get_daily_goal(connection, extra_goal_id)["status"] == "checked_in"
-            assert repo.get_daily_goal(connection, primary_goal_id)["status"] == "active"
+            assert repo.get_daily_goal(connection, primary_goal_id)["status"] == "checked_in"
         finally:
             connection.close()
 
@@ -205,6 +206,57 @@ def test_new_project_binding_uses_llm_project_name_instead_of_title() -> None:
         assert result["status"] == "applied"
         assert result["project"]["name"] == "Career Evidence Lab"
         assert result["project"]["name"] != recommendation["title"]
+        assert result["soul_sync"]["status"] == "synced"
+        assert result["soul_sync"]["current_project_append"]["status"] == "synced"
+        assert result["soul_sync"]["activity"]["recent_record"] == "added"
+        assert result["soul_sync"]["activity"]["soul_sync_queued"] is False
+        soul_text = soul_path.read_text(encoding="utf-8")
+        assert "Career Evidence Lab" in soul_text
+        assert "## 最近记录" in soul_text
+
+
+def test_new_project_binding_reuses_normalized_existing_project_name() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        db_path = root / "career-recommendation-normalized-project.sqlite3"
+        soul_path = _soul_file(root)
+        recommendation = _recommendation(
+            "SFT数据过滤实验",
+            project_binding={
+                "kind": "new_project",
+                "project_name": "SFT数据过滤实验（基于MiniAgent-RL）",
+                "reason": "Only whitespace differs from an existing project.",
+            },
+        )
+        _seed_project_and_message(db_path, recommendations=[recommendation])
+        connection = initialize_database(db_path)
+        try:
+            with connection:
+                existing_project_id = repo.create_project(
+                    connection,
+                    name="SFT 数据过滤实验（基于 MiniAgent-RL）",
+                    priority="P2",
+                    status="active",
+                )
+        finally:
+            connection.close()
+
+        result = adopt_career_recommendation(
+            db_path,
+            {"message_id": 1, "recommendation_index": 0, "mode": "new_project"},
+            today=WORKDAY,
+            soul_path=soul_path,
+        ).payload
+
+        assert result["status"] == "applied"
+        assert result["project"]["id"] == existing_project_id
+        assert result["action"]["action"] == "existing_project_goal"
+        connection = initialize_database(db_path)
+        try:
+            projects = repo.list_projects(connection)
+            assert sum(1 for project in projects if "SFT" in project["name"]) == 1
+        finally:
+            connection.close()
 
 
 def test_legacy_recommendation_without_binding_still_uses_text_match() -> None:
@@ -293,7 +345,7 @@ def test_adopting_same_recommendation_is_idempotent() -> None:
         assert second["action"]["daily_goal_id"] == first["action"]["daily_goal_id"]
         connection = initialize_database(db_path)
         try:
-            assert len(repo.list_daily_goals_by_date(connection, WORKDAY.isoformat())) == 2
+            assert len(repo.list_daily_goals_by_date(connection, WORKDAY.isoformat())) == 1
             history = get_career_chat_history(db_path, 1)
             recommendation = history["messages"][0]["recommendations"][0]
             assert recommendation["adoption"]["daily_goal_id"] == first["action"]["daily_goal_id"]
@@ -360,14 +412,15 @@ def test_weekend_adoption_records_project_then_creates_goal_on_next_workday() ->
 
 
 def main() -> None:
-    test_adopting_existing_project_recommendation_adds_independent_daily_goal()
+    test_adopting_existing_project_recommendation_reuses_project_daily_goal()
     test_new_project_binding_uses_llm_project_name_instead_of_title()
+    test_new_project_binding_reuses_normalized_existing_project_name()
     test_legacy_recommendation_without_binding_still_uses_text_match()
     test_invalid_existing_project_binding_returns_candidates_without_writing()
     test_adopting_same_recommendation_is_idempotent()
     test_ambiguous_project_match_returns_candidates_without_writing()
     test_weekend_adoption_records_project_then_creates_goal_on_next_workday()
-    print("PASS: career recommendation adoption creates independent daily goals")
+    print("PASS: career recommendation adoption reuses current project goals and avoids duplicate projects")
 
 
 if __name__ == "__main__":

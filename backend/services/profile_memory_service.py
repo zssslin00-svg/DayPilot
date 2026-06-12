@@ -40,18 +40,8 @@ def sync_profile_memory_to_soul(
     *,
     soul_path: str | Path = SOUL_PATH,
 ) -> Path:
-    connection = initialize_database(db_path)
-    try:
-        profile = repo.get_user_profile(connection)
-        if profile is None:
-            raise ProfileMemoryUpdateError("user_profile_not_found")
-        return _sync_soul_profile_sections(
-            Path(soul_path),
-            goal_preferences=dict(profile.get("goal_preferences") or {}),
-            avoid_patterns=_string_list(profile.get("avoid_patterns")),
-        )
-    finally:
-        connection.close()
+    _ = db_path
+    return Path(soul_path)
 
 
 def apply_profile_memory_from_feedback(
@@ -275,39 +265,6 @@ def _apply_profile_memory_output(
     finally:
         connection.close()
 
-    if applied:
-        try:
-            soul_backup = _sync_soul_profile_sections(
-                soul_path,
-                goal_preferences=new_preferences,
-                avoid_patterns=profile_avoid_patterns,
-            )
-            connection = initialize_database(db_path)
-            try:
-                with connection:
-                    repo.update_profile_memory_event(
-                        connection,
-                        event_id,
-                        soul_backup_path=str(soul_backup),
-                    )
-            finally:
-                connection.close()
-        except Exception as exc:  # noqa: BLE001 - DB memory is the source of truth
-            soul_sync_error = _safe_error(exc)
-            from backend.services.soul_sync_service import enqueue_soul_sync_retry
-
-            soul_sync_retry_job_id = enqueue_soul_sync_retry(
-                db_path,
-                job_type="profile_memory",
-                source_table="profile_memory_events",
-                source_id=event_id,
-                payload={
-                    "profile_id": 1,
-                    "profile_memory_event_id": event_id,
-                },
-                error=soul_sync_error,
-            )
-
     return {
         "status": status,
         "applied_items_count": applied_items_count,
@@ -319,6 +276,7 @@ def _apply_profile_memory_output(
         "soul_sync_queued": soul_sync_retry_job_id is not None,
         "soul_sync_retry_job_id": soul_sync_retry_job_id,
         "soul_sync_error": soul_sync_error,
+        "soul_sync_disabled_reason": "profile_memory_no_longer_writes_soul",
     }
 
 

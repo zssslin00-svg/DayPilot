@@ -365,6 +365,7 @@ class DayPilotHandler(BaseHTTPRequestHandler):
                 self.server.db_path,
                 payload,
                 default_date=self.server.today_provider(),
+                soul_path=self.server.soul_path,
             )
         except WeeklyReportValidationError as exc:
             self._send_json(400, {"error": "invalid_weekly_report_request", "detail": str(exc)})
